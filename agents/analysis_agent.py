@@ -1,26 +1,28 @@
 import asyncio
 import os
+import json
+from statistics import mean
+
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
+
 from graph.state import MarketState
 from services.coingecko import get_ohlc_data
 from utils.indicators import calculate_indicators
+from utils.serializer import sanitize
 
+# ─────────────────────────────────────────────────────────────
+# AGENTE PRINCIPAL
+# ─────────────────────────────────────────────────────────────
 
 async def analysis_agent(state: MarketState) -> MarketState:
-    """
-    Agente 2: Análisis técnico + sentiment del LLM.
-    - Calcula RSI, MACD, Bollinger por cada asset
-    - Usa Groq (Llama 3) para analizar sentiment de noticias
-    """
-    print("[AnalysisAgent] Iniciando análisis técnico y sentiment...")
+    print("[AnalysisAgent] Iniciando análisis técnico + sentiment PRO...")
 
     assets = state.get("assets", [])
     raw_news = state.get("raw_news", [])
-    raw_prices = state.get("raw_prices", {})
     warnings = state.get("warnings", [])
 
-    # 1. Indicadores técnicos (paralelo por asset)
+    # ── 1. INDICADORES TÉCNICOS ────────────────────────────────
     indicators = {}
     ohlc_tasks = {asset: get_ohlc_data(asset, days=14) for asset in assets}
 
@@ -28,105 +30,156 @@ async def analysis_agent(state: MarketState) -> MarketState:
 
     for asset, result in zip(ohlc_tasks.keys(), ohlc_results):
         if isinstance(result, Exception):
-            warnings.append(f"No se pudo obtener OHLC para {asset}: {str(result)}")
+            warnings.append(f"OHLC error {asset}: {str(result)}")
             indicators[asset] = {"error": str(result)}
         else:
-            indicators[asset] = calculate_indicators(result)
-            print(f"[AnalysisAgent] {asset} - RSI: {indicators[asset].get('rsi', {}).get('value')}")
+            indicators[asset] = sanitize(calculate_indicators(result))
 
-    # 2. Sentiment via LLM (Groq / Llama 3)
-    sentiment_scores = {}
+    # ── 2. SENTIMENT (LLM + fallback) ──────────────────────────
     try:
-        sentiment_scores = await _analyze_sentiment_with_llm(assets, raw_news)
+        llm_scores = await _analyze_sentiment_with_llm(assets, raw_news)
     except Exception as e:
-        warnings.append(f"Sentiment LLM falló: {str(e)}")
-        # Fallback: usar sentiment_hint de los votos de CryptoPanic
-        sentiment_scores = _fallback_sentiment(assets, raw_news)
+        warnings.append(f"LLM sentiment falló: {str(e)}")
+        llm_scores = {}
 
-    print(f"[AnalysisAgent] Sentiment scores: {sentiment_scores}")
+    fallback_scores = _fallback_sentiment(assets, raw_news)
 
-    return {
+    # ── 3. FUSIÓN INTELIGENTE ──────────────────────────────────
+    sentiment_scores = {}
+
+    for asset in assets:
+        llm = llm_scores.get(asset)
+        fb = fallback_scores.get(asset, 0)
+
+        if llm is not None:
+            # peso 70% LLM, 30% fallback
+            score = (llm * 0.7) + (fb * 0.3)
+        else:
+            score = fb
+
+        sentiment_scores[asset] = float(round(max(-1.0, min(1.0, score)), 3))
+
+    print("[AnalysisAgent] Sentiment final:", sentiment_scores)
+
+    return sanitize({
         **state,
         "indicators": indicators,
         "sentiment_scores": sentiment_scores,
         "warnings": warnings,
         "nodo_error": None,
-    }
+    })
 
 
-async def _analyze_sentiment_with_llm(
-    assets: list,
-    news: list,
-) -> dict:
-    """
-    Usa Groq (Llama 3) para analizar el sentiment de las noticias
-    y devolver un score por asset entre -1 (muy bearish) y 1 (muy bullish).
-    """
+# ─────────────────────────────────────────────────────────────
+# LLM SENTIMENT (MEJORADO)
+# ─────────────────────────────────────────────────────────────
+
+async def _analyze_sentiment_with_llm(assets: list, news: list) -> dict:
     groq_api_key = os.getenv("GROQ_API_KEY")
     if not groq_api_key:
         raise ValueError("GROQ_API_KEY no configurada")
 
     llm = ChatGroq(
-        model="llama-3.1-8b-instant",
-        temperature=0.1,
+        model="llama-3.3-70b-versatile",
+        temperature=0,
         api_key=groq_api_key,
     )
 
-    # Preparar resumen de noticias para el prompt
+    # ── prompt más estructurado ───────────────────────────────
     news_summary = "\n".join([
-        f"- [{', '.join(n.get('currencies', []))}] {n.get('title', '')} ({n.get('sentiment_hint', 'neutral')})"
-        for n in news[:10]
+        f"- {n.get('title', '')} | sentiment_hint: {n.get('sentiment_hint', 'neutral')} | coins: {','.join(n.get('currencies', []))}"
+        for n in news[:12]
     ])
 
     assets_str = ", ".join(assets)
 
-    system_msg = SystemMessage(content="""Eres un analista de criptomonedas experto en análisis de sentimiento de mercado.
-Tu tarea es analizar noticias y devolver ÚNICAMENTE un JSON con scores de sentimiento.
-Responde SOLO con el JSON, sin texto adicional, sin markdown, sin backticks.""")
+    system_msg = SystemMessage(content="""
+Eres un analista cuantitativo de criptomonedas.
 
-    human_msg = HumanMessage(content=f"""Analiza el sentimiento de estas noticias para los assets: {assets_str}
+Tu tarea:
+- Analizar noticias
+- Evaluar impacto REAL en precio
+- Devolver SOLO JSON válido
 
-NOTICIAS RECIENTES:
+Reglas:
+- Score entre -1 y 1
+- -1 = muy bearish
+- 0 = neutral
+- 1 = muy bullish
+- No inventar assets
+- No texto extra
+""")
+
+    human_msg = HumanMessage(content=f"""
+Assets: {assets_str}
+
+Noticias:
 {news_summary}
 
-Devuelve un JSON con el siguiente formato exacto (score de -1 a 1, donde -1=muy bearish, 0=neutral, 1=muy bullish):
+Devuelve JSON EXACTO:
+
 {{
-  "BTC": 0.5,
-  "ETH": 0.2,
-  ...
+  "BTC": 0.2,
+  "ETH": -0.1
 }}
 
-Solo incluye los assets: {assets_str}
+Solo esos assets.
 """)
 
     response = await llm.ainvoke([system_msg, human_msg])
     content = response.content.strip()
 
-    # Limpiar posibles backticks
+    # ── limpieza robusta ─────────────────────────────────────
     content = content.replace("```json", "").replace("```", "").strip()
 
-    import json
-    scores = json.loads(content)
+    try:
+        parsed = json.loads(content)
+    except Exception:
+        raise ValueError(f"JSON inválido del LLM: {content}")
+    # ✅ VALIDACIÓN EXTRA DE JSON
+    if not isinstance(parsed, dict):
+         raise ValueError(f"LLM no devolvió un JSON válido: {parsed}")
+   
+    # ── validación fuerte ────────────────────────────────────
+    clean = {}
+    for asset in assets:
+        val = parsed.get(asset, 0)
 
-    # Validar que los scores estén en rango [-1, 1]
-    return {
-        asset: max(-1.0, min(1.0, float(scores.get(asset, 0.0))))
-        for asset in assets
-    }
+        try:
+            val = float(val)
+        except:
+            val = 0
 
+        clean[asset] = float(max(-1.0, min(1.0, float(val))))
+
+    return clean
+
+
+# ─────────────────────────────────────────────────────────────
+# FALLBACK (HEURÍSTICO MEJORADO)
+# ─────────────────────────────────────────────────────────────
 
 def _fallback_sentiment(assets: list, news: list) -> dict:
-    """Fallback sin LLM: sentiment basado en votos de CryptoPanic"""
-    scores = {asset: 0.0 for asset in assets}
+    scores = {asset: [] for asset in assets}
 
     for item in news:
         hint = item.get("sentiment_hint", "neutral")
         currencies = item.get("currencies", [])
 
-        value = 0.3 if hint == "bullish" else (-0.3 if hint == "bearish" else 0.0)
+        if hint == "bullish":
+            value = 0.4
+        elif hint == "bearish":
+            value = -0.4
+        else:
+            value = 0.0
 
-        for currency in currencies:
-            if currency in scores:
-                scores[currency] = max(-1.0, min(1.0, scores[currency] + value))
+        for c in currencies:
+            if c in scores:
+                scores[c].append(value)
 
-    return scores
+    # promedio por asset
+    final = {}
+    for asset, vals in scores.items():
+        final[asset] = float(round(mean(vals), 3)) if vals else 0.0
+
+    return final

@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 import uuid
 from graph.market_graph import market_graph
+from utils.serializer import sanitize
 
 router = APIRouter(prefix="/api/v1", tags=["market-intelligence"])
 
@@ -120,13 +121,14 @@ async def run_analysis_sync(request: AnalysisRequest):
 
     try:
         final_state = await market_graph.ainvoke(initial_state, config=config)
-        return {
+        final_state = sanitize(final_state)
+        return sanitize({
             "status": "completed",
             "report": final_state.get("report"),
             "opportunities": final_state.get("opportunities", []),
             "dolar_rates": final_state.get("dolar_rates", {}),
             "warnings": final_state.get("warnings", []),
-        }
+        })
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error en el análisis: {str(e)}")
 
@@ -174,6 +176,7 @@ async def _run_analysis(job_id: str, assets: List[str], budget_usd: float):
 
     try:
         final_state = await market_graph.ainvoke(initial_state, config=config)
+        final_state = sanitize(final_state)
         _jobs[job_id]["status"] = "completed"
         _jobs[job_id]["result"] = {
             "report": final_state.get("report"),

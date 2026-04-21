@@ -9,7 +9,7 @@ from graph.state import MarketState
 async def report_agent(state: MarketState) -> MarketState:
     """
     Agente 4: Genera un reporte final en lenguaje natural.
-    Usa Groq (Llama 3) para redactar el resumen ejecutivo.
+    Usa Groq (Llama 3.3 70B) para redactar el resumen ejecutivo.
     Fallback: reporte estructurado sin LLM.
     """
     print("[ReportAgent] Generando reporte final...")
@@ -20,11 +20,27 @@ async def report_agent(state: MarketState) -> MarketState:
     warnings = state.get("warnings", [])
     assets = state.get("assets", [])
 
+    # 🔥 Ordenar por score
+    opportunities = sorted(
+        opportunities,
+        key=lambda x: x.get("final_score", 0),
+        reverse=True
+    )
+
     try:
-        report = await _generate_llm_report(opportunities, dolar_rates, budget_usd, assets)
+        report = await _generate_llm_report(
+            opportunities,
+            dolar_rates,
+            budget_usd,
+            assets
+        )
     except Exception as e:
         warnings.append(f"LLM report falló, usando fallback: {str(e)}")
-        report = _generate_fallback_report(opportunities, dolar_rates, budget_usd)
+        report = _generate_fallback_report(
+            opportunities,
+            dolar_rates,
+            budget_usd
+        )
 
     print("[ReportAgent] Reporte generado.")
 
@@ -42,56 +58,102 @@ async def _generate_llm_report(
     budget_usd: float,
     assets: list,
 ) -> str:
+
+    # 🔥 Caso sin data → evitar alucinación
+    if not opportunities:
+        return (
+            "📊 RESUMEN DEL MERCADO:\n"
+            "No se detectaron oportunidades claras en este momento.\n\n"
+            "📌 NOTA DE RIESGO:\n"
+            "El mercado presenta condiciones inciertas. Se recomienda esperar confirmaciones.\n"
+        )
+
     groq_api_key = os.getenv("GROQ_API_KEY")
     if not groq_api_key:
         raise ValueError("GROQ_API_KEY no configurada")
 
     llm = ChatGroq(
-        model="llama-3.1-8b-instant",
-        temperature=0.3,
+        model="llama-3.3-70b-versatile",
+        temperature=0.1,
         api_key=groq_api_key,
     )
 
-    # Serializar datos relevantes para el prompt
-    opps_summary = json.dumps(
-        [{
+    # 🔥 limitar ruido (top 5)
+    opportunities = opportunities[:5]
+
+    # 🔥 separar BUY vs AVOID
+    buy = [o for o in opportunities if o["signal"] in ("BUY", "STRONG_BUY")]
+    avoid = [o for o in opportunities if o["signal"] in ("WAIT", "SELL", "AVOID")]
+
+    def enrich(o):
+        return {
             "asset": o["asset"],
             "signal": o["signal"],
             "score": o["final_score"],
             "price_usd": o["price_usd"],
-            "change_24h": o["change_24h"],
+            "change_24h": o.get("change_24h", 0),
             "suggested_usd": o["suggested_amount_usd"],
-            "key_signals": o["key_signals"],
-        } for o in opportunities],
-        ensure_ascii=False,
-        indent=2,
-    )
+            "confidence": (
+                "high" if o["final_score"] > 80
+                else "medium" if o["final_score"] > 60
+                else "low"
+            ),
+            "key_signals": o.get("key_signals", []),
+        }
+
+    buy_json = json.dumps([enrich(o) for o in buy], ensure_ascii=False, indent=2)
+    avoid_json = json.dumps([enrich(o) for o in avoid], ensure_ascii=False, indent=2)
 
     crypto_rate = dolar_rates.get("crypto", {}).get("avg", "N/D")
     blue_rate = dolar_rates.get("blue", {}).get("avg", "N/D")
     timestamp = datetime.now().strftime("%d/%m/%Y %H:%M")
 
-    system_msg = SystemMessage(content="""Eres un analista financiero especializado en criptomonedas para el mercado argentino.
-Redactas reportes claros, directos y útiles en español rioplatense.
-Siempre incluyes la advertencia de que el análisis es informativo y no es asesoramiento financiero.""")
+    system_msg = SystemMessage(content="""
+Eres un analista financiero especializado en criptomonedas para el mercado argentino.
 
-    human_msg = HumanMessage(content=f"""Genera un reporte de mercado conciso para un inversor argentino con ${budget_usd} USD disponibles.
+Redactas reportes claros, directos y útiles en español rioplatense.
+
+Reglas estrictas:
+- No inventes datos que no estén en el input
+- Si falta información, indícalo
+- Prioriza decisiones accionables sobre descripción
+- Sé concreto, sin relleno
+- Siempre incluye advertencia de riesgo
+""")
+
+    human_msg = HumanMessage(content=f"""
+Genera un reporte de mercado conciso para un inversor argentino con ${budget_usd} USD disponibles.
 
 FECHA Y HORA: {timestamp}
 DÓLAR CRYPTO: ${crypto_rate} ARS
 DÓLAR BLUE: ${blue_rate} ARS
 
-ANÁLISIS DE ASSETS:
-{opps_summary}
+OPORTUNIDADES DE COMPRA:
+{buy_json}
 
-El reporte debe tener:
-1. 📊 RESUMEN DEL MERCADO (2-3 líneas del contexto general)
-2. 🎯 OPORTUNIDADES DETECTADAS (listado de señales BUY/STRONG_BUY con justificación breve)
-3. ⚠️ ASSETS A EVITAR O ESPERAR (señales WAIT/SELL/AVOID con razón)
-4. 💰 ASIGNACIÓN SUGERIDA (cómo distribuir los ${budget_usd} USD)
-5. 📌 NOTA DE RIESGO (siempre al final)
+ASSETS A EVITAR:
+{avoid_json}
 
-Sé directo y concreto. Máximo 400 palabras.""")
+Responde usando EXACTAMENTE este formato:
+
+📊 RESUMEN DEL MERCADO:
+...
+
+🎯 OPORTUNIDADES DETECTADAS:
+- ...
+
+⚠️ ASSETS A EVITAR O ESPERAR:
+- ...
+
+💰 ASIGNACIÓN SUGERIDA:
+...
+
+📌 NOTA DE RIESGO:
+...
+
+No agregues secciones adicionales.
+Máximo 400 palabras.
+""")
 
     response = await llm.ainvoke([system_msg, human_msg])
     return response.content

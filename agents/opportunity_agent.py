@@ -1,21 +1,23 @@
 from graph.state import MarketState
-from utils.indicators import score_asset
 from typing import List, Dict, Any
+from utils.serializer import sanitize
 
+# ── Pesos tipo hedge fund ─────────────────────────────
+WEIGHTS = {
+    "technical": 0.4,
+    "momentum": 0.25,
+    "volatility": 0.15,
+    "sentiment": 0.2,
+}
 
-# Umbrales configurables
-SCORE_STRONG_BUY = 72
-SCORE_BUY = 58
-SCORE_WAIT = 42
+# Umbrales
+SCORE_STRONG_BUY = 75
+SCORE_BUY = 60
+SCORE_WAIT = 45
 SCORE_SELL = 30
 
 
 async def opportunity_agent(state: MarketState) -> MarketState:
-    """
-    Agente 3: Detecta oportunidades combinando indicadores + sentiment.
-    Asigna una señal (STRONG_BUY / BUY / WAIT / SELL / AVOID) y
-    calcula cuánto invertir si el budget está configurado.
-    """
     print("[OpportunityAgent] Evaluando oportunidades...")
 
     assets = state.get("assets", [])
@@ -29,72 +31,114 @@ async def opportunity_agent(state: MarketState) -> MarketState:
     opportunities = []
 
     for asset in assets:
-        asset_indicators = indicators.get(asset, {})
+        ind = indicators.get(asset, {})
         sentiment = sentiment_scores.get(asset, 0.0)
         price_data = raw_prices.get(asset, {})
 
-        if "error" in asset_indicators or not asset_indicators:
-            warnings.append(f"Skipping {asset}: sin indicadores disponibles")
+        if not ind or "error" in ind:
+            warnings.append(f"Skipping {asset}: sin indicadores")
             continue
 
-        # Score técnico (0-100)
-        technical_score = score_asset(asset_indicators)
+        # ── SCORING ENGINE ─────────────────────────────
 
-        # Ajuste por sentiment (-10 a +10)
-        sentiment_bonus = sentiment * 10
+        tech = _score_technical(ind)
+        momentum = _score_momentum(price_data)
+        volatility = _score_volatility(ind)
+        sentiment_score = (sentiment + 1) * 50  # [-1,1] → [0,100]
 
-        # Score final
-        final_score = round(min(100.0, max(0.0, technical_score + sentiment_bonus)), 1)
+        final_score = float(round(
+        float(tech) * WEIGHTS["technical"]
+        + float(momentum) * WEIGHTS["momentum"]
+        + float(volatility) * WEIGHTS["volatility"]
+        + float(sentiment_score) * WEIGHTS["sentiment"],
+        1,
+        ))
 
-        # Señal
+        # ── SIGNAL ─────────────────────────────
         signal = _get_signal(final_score)
 
-        # Porcentaje sugerido del portfolio para este asset
-        allocation_pct = _get_allocation(signal, final_score)
+        allocation_pct = _dynamic_allocation(signal, final_score)
         suggested_amount = round(budget_usd * allocation_pct / 100, 2)
 
-        # Precio en ARS (usando dólar crypto)
         price_usd = price_data.get("price_usd", 0)
         crypto_rate = dolar_rates.get("crypto", {}).get("avg")
-        price_ars = round(price_usd * crypto_rate, 2) if crypto_rate and price_usd else None
+        price_ars = (
+                 float(round(float(price_usd) * float(crypto_rate), 2))
+                 if crypto_rate and price_usd else None
+        )
 
-        opportunity = {
+        opportunities.append({
             "asset": asset,
             "signal": signal,
             "final_score": final_score,
-            "technical_score": round(technical_score, 1),
-            "sentiment_score": round(sentiment, 2),
+            "scores": {
+                "technical": float(round(tech, 1)),
+                "momentum": float(round(momentum, 1)),
+                "volatility": float(round(volatility, 1)),
+                "sentiment": float(round(sentiment_score, 1)),
+            },
             "price_usd": price_usd,
             "price_ars": price_ars,
             "change_24h": price_data.get("change_24h"),
-            "change_7d": price_data.get("change_7d"),
-            "suggested_amount_usd": suggested_amount if signal in ("STRONG_BUY", "BUY") else 0,
-            "allocation_pct": allocation_pct if signal in ("STRONG_BUY", "BUY") else 0,
-            "key_signals": _extract_key_signals(asset_indicators, sentiment),
-            "risk_note": _get_risk_note(signal, price_data),
-        }
+            "suggested_amount_usd": suggested_amount if signal in ("BUY", "STRONG_BUY") else 0,
+            "allocation_pct": allocation_pct,
+            "key_signals": _extract_key_signals(ind, sentiment),
+        })
 
-        opportunities.append(opportunity)
-        print(f"[OpportunityAgent] {asset}: {signal} (score: {final_score})")
+        print(f"[OpportunityAgent] {asset}: {signal} ({final_score})")
 
-    # Ordenar por score descendente
+    # Ordenar
     opportunities.sort(key=lambda x: x["final_score"], reverse=True)
 
-    # Validar que el total sugerido no supere el budget
-    total_suggested = sum(o["suggested_amount_usd"] for o in opportunities)
-    if total_suggested > budget_usd:
-        # Recalibrar proporcionalmente
-        factor = budget_usd / total_suggested
-        for o in opportunities:
-            o["suggested_amount_usd"] = round(o["suggested_amount_usd"] * factor, 2)
-
-    return {
+    return sanitize({
         **state,
         "opportunities": opportunities,
         "warnings": warnings,
         "nodo_error": None,
-    }
+    })
 
+
+# ── SCORING FUNCTIONS ─────────────────────────────
+
+def _score_technical(indicators: Dict) -> float:
+    score = 50
+
+    rsi = indicators.get("rsi", {}).get("value", 50)
+    if rsi < 30:
+        score += 20
+    elif rsi > 70:
+        score -= 20
+
+    macd = indicators.get("macd", {})
+    if macd.get("crossover") == "bullish_crossover":
+        score += 15
+    elif macd.get("crossover") == "bearish_crossover":
+        score -= 15
+
+    return max(0, min(100, score))
+
+
+def _score_momentum(price_data: Dict) -> float:
+    change_24h = price_data.get("change_24h", 0) or 0
+    change_7d = price_data.get("change_7d", 0) or 0
+
+    score = 50 + (change_24h * 1.5) + (change_7d * 0.5)
+    return max(0, min(100, score))
+
+
+def _score_volatility(indicators: Dict) -> float:
+    bb = indicators.get("bollinger", {})
+    width = bb.get("width", 0)
+
+    if width > 0.2:
+        return 40  # alta volatilidad = riesgo
+    elif width < 0.05:
+        return 60  # compresión = posible breakout
+
+    return 50
+
+
+# ── SIGNAL LOGIC ─────────────────────────────
 
 def _get_signal(score: float) -> str:
     if score >= SCORE_STRONG_BUY:
@@ -108,75 +152,28 @@ def _get_signal(score: float) -> str:
     return "AVOID"
 
 
-def _get_allocation(signal: str, score: float) -> float:
-    """Porcentaje sugerido del portfolio total"""
-    allocations = {
-        "STRONG_BUY": 40.0,
-        "BUY": 25.0,
-        "WAIT": 0.0,
-        "SELL": 0.0,
-        "AVOID": 0.0,
-    }
-    return allocations.get(signal, 0.0)
+# ── PORTFOLIO LOGIC ─────────────────────────────
 
+def _dynamic_allocation(signal: str, score: float) -> float:
+    if signal == "STRONG_BUY":
+        return min(50, score * 0.5)
+    if signal == "BUY":
+        return min(30, score * 0.3)
+    return 0
+
+
+# ── UX SIGNALS ─────────────────────────────
 
 def _extract_key_signals(indicators: Dict, sentiment: float) -> List[str]:
-    """Extrae las señales más relevantes en lenguaje natural"""
     signals = []
 
-    rsi = indicators.get("rsi", {})
-    macd = indicators.get("macd", {})
-    bb = indicators.get("bollinger", {})
-    trend = indicators.get("volume_trend", {})
+    if sentiment > 0.4:
+        signals.append("🟢 Sentimiento positivo fuerte")
+    elif sentiment < -0.4:
+        signals.append("🔴 Sentimiento negativo fuerte")
 
-    rsi_signal = rsi.get("signal")
-    if rsi_signal == "oversold":
-        signals.append("🟢 RSI en sobreventa — posible punto de entrada")
-    elif rsi_signal == "overbought":
-        signals.append("🔴 RSI en sobrecompra — precaución")
-    elif rsi_signal == "approaching_oversold":
-        signals.append("🟡 RSI acercándose a sobreventa")
+    rsi = indicators.get("rsi", {}).get("value")
+    if rsi and rsi < 30:
+        signals.append("🟢 RSI sobreventa")
 
-    crossover = macd.get("crossover")
-    if crossover == "bullish_crossover":
-        signals.append("🟢 MACD: cruce alcista detectado")
-    elif crossover == "bearish_crossover":
-        signals.append("🔴 MACD: cruce bajista detectado")
-    elif macd.get("trend") == "bullish":
-        signals.append("🟡 MACD: tendencia alcista")
-
-    bb_pos = bb.get("position")
-    if bb_pos == "near_lower_band":
-        signals.append("🟢 Precio cerca de la banda inferior de Bollinger — posible rebote")
-    elif bb_pos == "near_upper_band":
-        signals.append("🔴 Precio cerca de la banda superior — posible corrección")
-
-    if trend.get("trend") == "bullish" and trend.get("strength", 0) > 2:
-        signals.append("🟢 Tendencia alcista de medias móviles")
-    elif trend.get("trend") == "bearish":
-        signals.append("🔴 Tendencia bajista de medias móviles")
-
-    if sentiment > 0.3:
-        signals.append(f"🟢 Sentimiento positivo en noticias ({sentiment:+.2f})")
-    elif sentiment < -0.3:
-        signals.append(f"🔴 Sentimiento negativo en noticias ({sentiment:+.2f})")
-
-    return signals if signals else ["⚪ Sin señales claras en este momento"]
-
-
-def _get_risk_note(signal: str, price_data: Dict) -> str:
-    change_24h = price_data.get("change_24h", 0) or 0
-    ath_change = price_data.get("ath_change_percentage", 0) or 0
-
-    notes = []
-
-    if abs(change_24h) > 5:
-        direction = "subida" if change_24h > 0 else "caída"
-        notes.append(f"Alta volatilidad: {direction} del {abs(change_24h):.1f}% en 24h")
-
-    if ath_change > -10:
-        notes.append("Precio cerca de su máximo histórico — mayor riesgo")
-
-    notes.append("⚠️ Esto es análisis informativo, no asesoramiento financiero")
-
-    return " | ".join(notes)
+    return signals or ["⚪ Sin señales claras"]

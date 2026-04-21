@@ -8,7 +8,7 @@ __pycache__/
 # Variables de entorno
 .env
 .env.example
-
+node_modules/
 # OS
 .DS_Store
 Thumbs.db
