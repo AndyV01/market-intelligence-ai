@@ -1,0 +1,67 @@
+import asyncio
+from graph.state import MarketState
+from services.coingecko import get_current_prices
+from services.cryptopanic import get_crypto_news
+from services.dolar import get_dolar_rates
+
+
+async def data_agent(state: MarketState) -> MarketState:
+    """
+    Agente 1: Recolecta datos de mercado en paralelo.
+    - Precios actuales desde CoinGecko
+    - Noticias recientes desde CryptoPanic
+    - Tipos de cambio desde dolarapi.com
+    """
+    print("[DataAgent] Iniciando recolección de datos...")
+    assets = state.get("assets", ["BTC", "ETH"])
+    warnings = state.get("warnings", [])
+
+    # Ejecutar las 3 fuentes en paralelo
+    try:
+        prices_task = get_current_prices(assets)
+        news_task = get_crypto_news(assets, limit=15)
+        dolar_task = get_dolar_rates()
+
+        raw_prices, raw_news, dolar_rates = await asyncio.gather(
+            prices_task,
+            news_task,
+            dolar_task,
+            return_exceptions=True,
+        )
+
+        # Manejo de errores parciales
+        if isinstance(raw_prices, Exception):
+            warnings.append(f"Error fetching prices: {str(raw_prices)}")
+            raw_prices = {}
+
+        if isinstance(raw_news, Exception):
+            warnings.append(f"Error fetching news: {str(raw_news)}")
+            raw_news = []
+
+        if isinstance(dolar_rates, Exception):
+            warnings.append(f"Error fetching dolar rates: {str(dolar_rates)}")
+            dolar_rates = {}
+
+        print(f"[DataAgent] Precios obtenidos: {list(raw_prices.keys())}")
+        print(f"[DataAgent] Noticias obtenidas: {len(raw_news)}")
+        print(f"[DataAgent] Tipos de cambio: {list(dolar_rates.keys())}")
+
+        return {
+            **state,
+            "raw_prices": raw_prices,
+            "raw_news": raw_news,
+            "dolar_rates": dolar_rates,
+            "warnings": warnings,
+            "nodo_error": None,
+        }
+
+    except Exception as e:
+        print(f"[DataAgent] Error crítico: {e}")
+        return {
+            **state,
+            "raw_prices": {},
+            "raw_news": [],
+            "dolar_rates": {},
+            "warnings": warnings,
+            "nodo_error": f"DataAgent falló: {str(e)}",
+        }
