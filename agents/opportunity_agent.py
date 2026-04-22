@@ -11,9 +11,9 @@ WEIGHTS = {
 }
 
 # Umbrales
-SCORE_STRONG_BUY = 75
-SCORE_BUY = 60
-SCORE_WAIT = 45
+SCORE_STRONG_BUY = 70
+SCORE_BUY = 55
+SCORE_WAIT = 40
 SCORE_SELL = 30
 
 
@@ -67,6 +67,21 @@ async def opportunity_agent(state: MarketState) -> MarketState:
                  if crypto_rate and price_usd else None
         )
 
+        print(f"[OpportunityAgent] {asset}: {signal} ({final_score})")
+        
+        if final_score < 62:
+         continue
+
+        if momentum < 55:
+         continue
+
+        if final_score >= 60:
+         allocation_pct = _dynamic_allocation(signal, final_score)
+         suggested_amount = round(budget_usd * allocation_pct / 100, 2)
+        else:
+         allocation_pct = 0
+         suggested_amount = 0
+
         opportunities.append({
             "asset": asset,
             "signal": signal,
@@ -80,12 +95,12 @@ async def opportunity_agent(state: MarketState) -> MarketState:
             "price_usd": price_usd,
             "price_ars": price_ars,
             "change_24h": price_data.get("change_24h"),
-            "suggested_amount_usd": suggested_amount if signal in ("BUY", "STRONG_BUY") else 0,
+            "suggested_amount_usd": suggested_amount if final_score >= 62 else 0,
             "allocation_pct": allocation_pct,
             "key_signals": _extract_key_signals(ind, sentiment),
         })
 
-        print(f"[OpportunityAgent] {asset}: {signal} ({final_score})")
+       
 
     # Ordenar
     opportunities.sort(key=lambda x: x["final_score"], reverse=True)

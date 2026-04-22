@@ -21,7 +21,7 @@ export default function App() {
   useEffect(() => {
     runAnalysis();
 
-    const interval = setInterval(runAnalysis, 120000); 
+    const interval = setInterval(runAnalysis, 300000); 
 
     return () => clearInterval(interval);
   }, []);

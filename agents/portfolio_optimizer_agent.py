@@ -1,98 +1,169 @@
 import math
+import numpy as np
 from typing import Dict, List
 from graph.state import MarketState
 
-
-MAX_SINGLE_POSITION = 0.4   # 40% máximo por asset
-MIN_POSITION = 0.05         # mínimo para incluir
+MAX_WEIGHT = 0.35
+MIN_WEIGHT = 0.03
+TARGET_VOL = 0.15  # target de volatilidad portfolio (15%)
 
 
 async def portfolio_optimizer_agent(state: MarketState) -> MarketState:
-    print("[PortfolioOptimizer] Optimizando portfolio...")
+    print("[PortfolioOptimizer] Quant optimization (risk parity + sharpe)...")
 
     opportunities = state.get("opportunities", [])
     budget = state.get("budget_usd", 300.0)
     warnings = state.get("warnings", [])
 
-    # ── 1. Filtrar assets invertibles ─────────────────────
     investable = [
         o for o in opportunities
         if o["signal"] in ("STRONG_BUY", "BUY")
     ]
 
-    if not investable:
-        warnings.append("No hay activos aptos para inversión")
+    if len(investable) < 2:
+        warnings.append("Muy pocos activos para optimización real")
         return state
 
-    # ── 2. Score → peso base ──────────────────────────────
-    weights = {}
+    assets = [o["asset"] for o in investable]
+
+    # ─────────────────────────────────────────────
+    # 1. ESTIMAR RETURNS Y VOLATILIDAD
+    # ─────────────────────────────────────────────
+
+    returns = []
+    volatilities = []
 
     for o in investable:
-        score = o["final_score"]
+        momentum = o["scores"]["momentum"]
+        vol_score = o["scores"]["volatility"]
 
-        # exponencial → prioriza high conviction
-        weights[o["asset"]] = math.exp(score / 20)
+        # expected return proxy
+        r = (momentum - 50) / 50  # [-1,1]
+        returns.append(r)
 
-    # ── 3. Ajuste por volatilidad ─────────────────────────
-    for o in investable:
-        asset = o["asset"]
-        vol_score = o["scores"]["volatility"]  # 0–100
+        # volatility proxy
+        vol = max(0.05, vol_score / 100)
+        volatilities.append(vol)
 
-        # mayor volatilidad → menor peso
-        vol_penalty = (100 - vol_score) / 100
+    returns = np.array(returns)
+    volatilities = np.array(volatilities)
 
-        weights[asset] *= vol_penalty
+    # ─────────────────────────────────────────────
+    # 2. MATRIZ DE CORRELACIÓN (SIMPLIFICADA)
+    # ─────────────────────────────────────────────
 
-    # ── 4. Normalizar pesos ───────────────────────────────
-    total_weight = sum(weights.values())
+    n = len(assets)
+    corr_matrix = np.ones((n, n))
 
-    normalized = {
-        asset: w / total_weight
-        for asset, w in weights.items()
-    }
+    for i in range(n):
+        for j in range(n):
+            if i == j:
+                corr_matrix[i][j] = 1
+            else:
+                # penalizar assets similares (crypto suelen estar correlacionadas)
+                diff = abs(returns[i] - returns[j])
+                corr = 0.8 - diff * 0.5
+                corr_matrix[i][j] = max(0.3, min(0.9, corr))
 
-    # ── 5. Cap por asset (riesgo) ─────────────────────────
-    capped = {}
-    overflow = 0
+    # covarianza
+    cov_matrix = np.outer(volatilities, volatilities) * corr_matrix
 
-    for asset, w in normalized.items():
-        if w > MAX_SINGLE_POSITION:
-            overflow += w - MAX_SINGLE_POSITION
-            capped[asset] = MAX_SINGLE_POSITION
+    # ─────────────────────────────────────────────
+    # 3. RISK PARITY (inverso de volatilidad)
+    # ─────────────────────────────────────────────
+
+    inv_vol = 1 / volatilities
+    rp_weights = inv_vol / np.sum(inv_vol)
+
+    # ─────────────────────────────────────────────
+    # 4. SHARPE-LIKE OPTIMIZATION
+    # ─────────────────────────────────────────────
+
+    port_return = np.dot(rp_weights, returns)
+    port_vol = math.sqrt(np.dot(rp_weights.T, np.dot(cov_matrix, rp_weights)))
+
+    sharpe = port_return / (port_vol + 1e-6)
+
+    # ajuste: más peso a mejores activos
+    adjusted = rp_weights * np.maximum(returns, 0.01)
+
+    weights = adjusted / np.sum(adjusted)
+
+    # ─────────────────────────────────────────────
+    # 4.5 CONTROL DE RIESGO TOTAL (ACA VA)
+    # ─────────────────────────────────────────────
+
+    MAX_PORTFOLIO_RISK = 0.6  # 60% del capital
+
+    total_weight = np.sum(weights)
+
+    if total_weight > MAX_PORTFOLIO_RISK:
+       scale = MAX_PORTFOLIO_RISK / total_weight
+       weights = weights * scale
+
+    # ─────────────────────────────────────────────
+    # 5. VOLATILITY TARGETING
+    # ─────────────────────────────────────────────
+
+    port_vol = math.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+
+    if port_vol > 0:
+        scale = TARGET_VOL / port_vol
+        weights = weights * scale
+
+        total_weight = np.sum(weights)
+
+    if total_weight > MAX_PORTFOLIO_RISK:
+     scale = MAX_PORTFOLIO_RISK / total_weight
+     weights = weights * scale
+
+    # ─────────────────────────────────────────────
+    # 6. CAPS Y LIMPIEZA
+    # ─────────────────────────────────────────────
+
+    final_weights = {}
+    excess = 0
+
+    for i, a in enumerate(assets):
+        w = weights[i]
+
+        if w > MAX_WEIGHT:
+            excess += w - MAX_WEIGHT
+            final_weights[a] = MAX_WEIGHT
         else:
-            capped[asset] = w
+            final_weights[a] = w
 
-    # Redistribuir exceso
-    if overflow > 0:
-        remaining_assets = [
-            a for a in capped if capped[a] < MAX_SINGLE_POSITION
-        ]
-        if remaining_assets:
-            extra = overflow / len(remaining_assets)
-            for a in remaining_assets:
-                capped[a] += extra
+    # redistribuir exceso
+    if excess > 0:
+        remaining = {a: w for a, w in final_weights.items() if w < MAX_WEIGHT}
+        total_remain = sum(remaining.values())
 
-    # ── 6. Limpiar posiciones muy chicas ──────────────────
+        if total_remain > 0:
+            for a in remaining:
+                final_weights[a] += (remaining[a] / total_remain) * excess
+
+    # filtrar mínimos
     final_weights = {
-        a: w for a, w in capped.items()
-        if w >= MIN_POSITION
+        a: w for a, w in final_weights.items()
+        if w >= MIN_WEIGHT
     }
 
-    # Re-normalizar
-    total = sum(final_weights.values())
-    final_weights = {
-        a: w / total for a, w in final_weights.items()
-    }
+    # normalizar final
+    final_weights = final_weights
 
-    # ── 7. Aplicar al portfolio ───────────────────────────
+    # ─────────────────────────────────────────────
+    # 7. OUTPUT
+    # ─────────────────────────────────────────────
+
     optimized = []
 
     for o in opportunities:
         asset = o["asset"]
 
         if asset in final_weights:
-            allocation_pct = round(final_weights[asset] * 100, 2)
-            amount = round(budget * final_weights[asset], 2)
+            w = final_weights[asset]
+            allocation_pct = round(w * 100, 2)
+            amount = round(budget * w, 2)
         else:
             allocation_pct = 0
             amount = 0
@@ -103,7 +174,8 @@ async def portfolio_optimizer_agent(state: MarketState) -> MarketState:
             "optimized_amount_usd": amount,
         })
 
-    print("[PortfolioOptimizer] Portfolio optimizado listo")
+    print(f"[PortfolioOptimizer] Sharpe approx: {round(sharpe, 3)}")
+    print("[PortfolioOptimizer] Optimización completada")
 
     return {
         **state,
