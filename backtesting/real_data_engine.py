@@ -1,7 +1,7 @@
 import numpy as np
 import asyncio
 from typing import Dict, List
-from services.coingecko import get_ohlc_data
+from services.binance import get_ohlc_data
 
 
 # ─────────────────────────────────────────────

@@ -59,13 +59,22 @@ async def _generate_llm_report(
     assets: list,
 ) -> str:
 
-    # 🔥 Caso sin data → evitar alucinación
+    # Caso sin data o sin oportunidades
     if not opportunities:
+        crypto_rate = dolar_rates.get("crypto", {}).get("avg", "N/D")
+        blue_rate = dolar_rates.get("blue", {}).get("avg", "N/D")
+        timestamp = datetime.now().strftime("%d/%m/%Y %H:%M")
+
         return (
-            "📊 RESUMEN DEL MERCADO:\n"
-            "No se detectaron oportunidades claras en este momento.\n\n"
-            "📌 NOTA DE RIESGO:\n"
-            "El mercado presenta condiciones inciertas. Se recomienda esperar confirmaciones.\n"
+          f"📊 MARKET STATUS — {timestamp}\n\n"
+          f"💵 Dólar Crypto: ${crypto_rate} ARS | Blue: ${blue_rate} ARS\n\n"
+          "🧠 CONDICIÓN DEL MERCADO:\n"
+          "No hay activos que cumplan criterios de entrada (score + momentum).\n"
+          "El sistema se mantiene en modo defensivo.\n\n"
+          "📌 ACCIÓN:\n"
+          "Esperar confirmaciones. No abrir posiciones.\n\n"
+          "⚠️ RIESGO:\n"
+          "Operar en estas condiciones aumenta probabilidad de pérdidas."
         )
 
     groq_api_key = os.getenv("GROQ_API_KEY")

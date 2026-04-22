@@ -3,14 +3,13 @@ from graph.state import MarketState
 from services.coingecko import get_current_prices
 from services.cryptopanic import get_crypto_news
 from services.dolar import get_dolar_rates
+from services.binance import get_ohlc_data
 
 
 async def data_agent(state: MarketState) -> MarketState:
     """
     Agente 1: Recolecta datos de mercado en paralelo.
-    - Precios actuales desde CoinGecko
-    - Noticias recientes desde CryptoPanic
-    - Tipos de cambio desde dolarapi.com
+    
     """
     print("[DataAgent] Iniciando recolección de datos...")
     assets = state.get("assets", ["BTC", "ETH"])
@@ -42,15 +41,28 @@ async def data_agent(state: MarketState) -> MarketState:
             warnings.append(f"Error fetching dolar rates: {str(dolar_rates)}")
             dolar_rates = {}
 
-        print(f"[DataAgent] Precios obtenidos: {list(raw_prices.keys())}")
-        print(f"[DataAgent] Noticias obtenidas: {len(raw_news)}")
-        print(f"[DataAgent] Tipos de cambio: {list(dolar_rates.keys())}")
+        historical_prices = {}
+
+        for asset in assets:
+            try:
+                ohlc = await get_ohlc_data(asset, limit=90)
+                closes = [candle["close"] for candle in ohlc]
+                historical_prices[asset] = closes
+                await asyncio.sleep(0.2)    
+
+            except Exception as e:
+                  warnings.append(f"OHLC error {asset}: {str(e)}")
+                  historical_prices[asset] = []  
+
+        print(f"[DataAgent] Historical loaded: {list(historical_prices.keys())}")
+        
 
         return {
             **state,
             "raw_prices": raw_prices,
             "raw_news": raw_news,
             "dolar_rates": dolar_rates,
+            "historical_prices": historical_prices,
             "warnings": warnings,
             "nodo_error": None,
         }
@@ -62,6 +74,7 @@ async def data_agent(state: MarketState) -> MarketState:
             "raw_prices": {},
             "raw_news": [],
             "dolar_rates": {},
+            "historical_prices": {},
             "warnings": warnings,
             "nodo_error": f"DataAgent falló: {str(e)}",
         }

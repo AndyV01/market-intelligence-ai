@@ -1,6 +1,7 @@
 from graph.state import MarketState
 from typing import List, Dict, Any
 from utils.serializer import sanitize
+import numpy as np
 
 # ── Pesos tipo hedge fund ─────────────────────────────
 WEIGHTS = {
@@ -25,8 +26,38 @@ async def opportunity_agent(state: MarketState) -> MarketState:
     sentiment_scores = state.get("sentiment_scores", {})
     raw_prices = state.get("raw_prices", {})
     dolar_rates = state.get("dolar_rates", {})
+    historical_prices = state.get("historical_prices", {})
     budget_usd = state.get("budget_usd", 300.0)
     warnings = state.get("warnings", [])
+
+    # ─────────────────────────────────────────
+    # ✅ REGIME DETECTION PRO (ACA VA)
+    # ─────────────────────────────────────────
+
+    btc_prices = historical_prices.get("BTC", [])
+
+    btc_trend = _get_trend(btc_prices)
+    btc_vol = _get_volatility(btc_prices)
+
+    if btc_trend == "bear":
+        regime = "risk_off"
+    elif btc_vol > 0.04:
+        regime = "risk_off"
+    elif btc_trend == "neutral":
+        regime = "neutral"
+    else:
+        regime = "risk_on"
+
+    print(f"[Regime PRO] BTC trend: {btc_trend} | vol: {round(btc_vol,4)} → {regime}")
+
+    # 🔴 CORTE TOTAL
+    is_risk_off = regime == "risk_off"
+    if is_risk_off:
+        warnings.append("Market regime: risk_off")
+
+    # ─────────────────────────────────────────
+    # OPORTUNIDADES
+    # ─────────────────────────────────────────
 
     opportunities = []
 
@@ -39,22 +70,32 @@ async def opportunity_agent(state: MarketState) -> MarketState:
             warnings.append(f"Skipping {asset}: sin indicadores")
             continue
 
-        # ── SCORING ENGINE ─────────────────────────────
-
+        # SCORING
         tech = _score_technical(ind)
         momentum = _score_momentum(price_data)
         volatility = _score_volatility(ind)
-        sentiment_score = (sentiment + 1) * 50  # [-1,1] → [0,100]
+        sentiment_score = (sentiment + 1) * 50
 
         final_score = float(round(
-        float(tech) * WEIGHTS["technical"]
-        + float(momentum) * WEIGHTS["momentum"]
-        + float(volatility) * WEIGHTS["volatility"]
-        + float(sentiment_score) * WEIGHTS["sentiment"],
-        1,
+            tech * WEIGHTS["technical"]
+            + momentum * WEIGHTS["momentum"]
+            + volatility * WEIGHTS["volatility"]
+            + sentiment_score * WEIGHTS["sentiment"],
+            1,
         ))
 
-        # ── SIGNAL ─────────────────────────────
+        print(f"[OpportunityAgent] {asset}: {_get_signal(final_score)} ({final_score})")
+
+        # FILTROS 
+        if final_score < 62:
+            continue
+
+        if momentum < 55:
+            continue
+
+        if is_risk_off and final_score < 65:
+            continue
+
         signal = _get_signal(final_score)
 
         allocation_pct = _dynamic_allocation(signal, final_score)
@@ -62,47 +103,30 @@ async def opportunity_agent(state: MarketState) -> MarketState:
 
         price_usd = price_data.get("price_usd", 0)
         crypto_rate = dolar_rates.get("crypto", {}).get("avg")
+
         price_ars = (
-                 float(round(float(price_usd) * float(crypto_rate), 2))
-                 if crypto_rate and price_usd else None
+            float(round(price_usd * crypto_rate, 2))
+            if crypto_rate and price_usd else None
         )
-
-        print(f"[OpportunityAgent] {asset}: {signal} ({final_score})")
-        
-        if final_score < 62:
-         continue
-
-        if momentum < 55:
-         continue
-
-        if final_score >= 60:
-         allocation_pct = _dynamic_allocation(signal, final_score)
-         suggested_amount = round(budget_usd * allocation_pct / 100, 2)
-        else:
-         allocation_pct = 0
-         suggested_amount = 0
 
         opportunities.append({
             "asset": asset,
             "signal": signal,
             "final_score": final_score,
             "scores": {
-                "technical": float(round(tech, 1)),
-                "momentum": float(round(momentum, 1)),
-                "volatility": float(round(volatility, 1)),
-                "sentiment": float(round(sentiment_score, 1)),
+                "technical": round(tech, 1),
+                "momentum": round(momentum, 1),
+                "volatility": round(volatility, 1),
+                "sentiment": round(sentiment_score, 1),
             },
             "price_usd": price_usd,
             "price_ars": price_ars,
             "change_24h": price_data.get("change_24h"),
-            "suggested_amount_usd": suggested_amount if final_score >= 62 else 0,
+            "suggested_amount_usd": suggested_amount,
             "allocation_pct": allocation_pct,
             "key_signals": _extract_key_signals(ind, sentiment),
         })
 
-       
-
-    # Ordenar
     opportunities.sort(key=lambda x: x["final_score"], reverse=True)
 
     return sanitize({
@@ -113,7 +137,38 @@ async def opportunity_agent(state: MarketState) -> MarketState:
     })
 
 
-# ── SCORING FUNCTIONS ─────────────────────────────
+# ─────────────────────────────────────────
+# ✅ REGIME HELPERS 
+# ─────────────────────────────────────────
+
+def _get_trend(price_series: list):
+    if len(price_series) < 50:
+        return "neutral"
+
+    ma20 = sum(price_series[-20:]) / 20
+    ma50 = sum(price_series[-50:]) / 50
+    price = price_series[-1]
+
+    if price > ma20 and ma20 > ma50:
+        return "bull"
+    elif price < ma20 and ma20 < ma50:
+        return "bear"
+    return "neutral"
+
+
+def _get_volatility(price_series: list):
+    if len(price_series) < 20:
+        return 0
+
+    returns = []
+    for i in range(1, len(price_series)):
+        r = (price_series[i] - price_series[i-1]) / price_series[i-1]
+        returns.append(r)
+
+    return np.std(returns[-20:])
+
+
+# ── SCORING ─────────────────────────────
 
 def _score_technical(indicators: Dict) -> float:
     score = 50
@@ -136,7 +191,6 @@ def _score_technical(indicators: Dict) -> float:
 def _score_momentum(price_data: Dict) -> float:
     change_24h = price_data.get("change_24h", 0) or 0
     change_7d = price_data.get("change_7d", 0) or 0
-
     score = 50 + (change_24h * 1.5) + (change_7d * 0.5)
     return max(0, min(100, score))
 
@@ -146,14 +200,12 @@ def _score_volatility(indicators: Dict) -> float:
     width = bb.get("width", 0)
 
     if width > 0.2:
-        return 40  # alta volatilidad = riesgo
+        return 40
     elif width < 0.05:
-        return 60  # compresión = posible breakout
+        return 60
 
     return 50
 
-
-# ── SIGNAL LOGIC ─────────────────────────────
 
 def _get_signal(score: float) -> str:
     if score >= SCORE_STRONG_BUY:
@@ -167,8 +219,6 @@ def _get_signal(score: float) -> str:
     return "AVOID"
 
 
-# ── PORTFOLIO LOGIC ─────────────────────────────
-
 def _dynamic_allocation(signal: str, score: float) -> float:
     if signal == "STRONG_BUY":
         return min(50, score * 0.5)
@@ -176,8 +226,6 @@ def _dynamic_allocation(signal: str, score: float) -> float:
         return min(30, score * 0.3)
     return 0
 
-
-# ── UX SIGNALS ─────────────────────────────
 
 def _extract_key_signals(indicators: Dict, sentiment: float) -> List[str]:
     signals = []
