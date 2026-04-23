@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import Dashboard from "./components/Dashboard";
 import { runAnalysisSync } from "./services/api";
+import AnimatedBackground from "./components/AnimatedBackground";
 
 export default function App() {
   const [data, setData] = useState(null);
@@ -28,8 +29,8 @@ export default function App() {
 
   return (
     <div style={{ padding: 20 }}>
+      <AnimatedBackground />
       <h1>📊 Market Intelligence</h1>
-
       <Dashboard data={data} loading={loading} />
     </div>
   );

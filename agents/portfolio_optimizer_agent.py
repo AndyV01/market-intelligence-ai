@@ -12,9 +12,14 @@ async def portfolio_optimizer_agent(state: MarketState) -> MarketState:
     print("[PortfolioOptimizer] Quant optimization (risk parity + sharpe)...")
 
     opportunities = state.get("opportunities", [])
-    budget = state.get("budget_usd", 300.0)
-    warnings = state.get("warnings", [])
+    macro = state.get("macro_allocation", {})
 
+    crypto_pct = macro.get("CRYPTO", 0)
+
+    budget = state.get("budget_usd", 300.0)
+    crypto_budget = budget * crypto_pct
+    warnings = state.get("warnings", [])
+    macro = state.get("macro_allocation")
     investable = [
         o for o in opportunities
         if o["signal"] in ("STRONG_BUY", "BUY")
@@ -22,7 +27,10 @@ async def portfolio_optimizer_agent(state: MarketState) -> MarketState:
 
     if len(investable) < 2:
         warnings.append("Muy pocos activos para optimización real")
-        return state
+        return {
+        **state,
+        "warnings": warnings,
+    }
 
     assets = [o["asset"] for o in investable]
 
@@ -163,7 +171,7 @@ async def portfolio_optimizer_agent(state: MarketState) -> MarketState:
         if asset in final_weights:
             w = final_weights[asset]
             allocation_pct = round(w * 100, 2)
-            amount = round(budget * w, 2)
+            amount = round(crypto_budget * w, 2)
         else:
             allocation_pct = 0
             amount = 0
@@ -176,9 +184,10 @@ async def portfolio_optimizer_agent(state: MarketState) -> MarketState:
 
     print(f"[PortfolioOptimizer] Sharpe approx: {round(sharpe, 3)}")
     print("[PortfolioOptimizer] Optimización completada")
-
+    
     return {
         **state,
         "opportunities": optimized,
         "warnings": warnings,
+        "macro_allocation": state.get("macro_allocation") or {},
     }

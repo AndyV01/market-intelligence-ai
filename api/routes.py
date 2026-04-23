@@ -121,13 +121,15 @@ async def run_analysis_sync(request: AnalysisRequest):
 
     try:
         final_state = await market_graph.ainvoke(initial_state, config=config)
-        final_state = sanitize(final_state)
+        print("MACRO BEFORE RESPONSE:", final_state.get("macro_allocation"))
         return sanitize({
             "status": "completed",
             "report": final_state.get("report"),
             "opportunities": final_state.get("opportunities", []),
             "dolar_rates": final_state.get("dolar_rates", {}),
-            "warnings": final_state.get("warnings", []),
+            "macro_allocation": final_state.get("macro_allocation", {}),
+            "argentina_instruments": final_state.get("argentina_instruments", {}),
+            "warnings": final_state.get("warnings", []), 
         })
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error en el análisis: {str(e)}")

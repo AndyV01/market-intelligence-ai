@@ -6,7 +6,8 @@ from agents.analysis_agent import analysis_agent
 from agents.opportunity_agent import opportunity_agent
 from agents.report_agent import report_agent
 from agents.portfolio_optimizer_agent import portfolio_optimizer_agent
-
+from agents.asset_allocator import asset_allocator_agent
+from agents.macro_data_agent import macro_data_agent
 
 # ── CONDITIONS ─────────────────────────────
 
@@ -47,6 +48,8 @@ def build_market_graph():
     graph.add_node("portfolio_optimizer_agent", portfolio_optimizer_agent)
     graph.add_node("report_agent", report_agent)
     graph.add_node("error_node", _error_node)
+    graph.add_node("asset_allocator_agent", asset_allocator_agent)
+    graph.add_node("macro_data_agent", macro_data_agent)
 
     graph.set_entry_point("data_agent")
 
@@ -55,14 +58,16 @@ def build_market_graph():
         "data_agent",
         _should_continue_after_data,
         {
-            "continue": "analysis_agent",
+            "continue": "macro_data_agent",
             "end_with_error": "error_node",
         },
     )
 
     # 🔹 FLOW NORMAL
+    graph.add_edge("macro_data_agent", "analysis_agent")
     graph.add_edge("analysis_agent", "opportunity_agent")
-    graph.add_edge("opportunity_agent", "portfolio_optimizer_agent")
+    graph.add_edge("opportunity_agent", "asset_allocator_agent")
+    graph.add_edge("asset_allocator_agent", "portfolio_optimizer_agent")
 
     # 🔹 OPTIMIZER → REPORT (CONDICIONAL)
     graph.add_conditional_edges(

@@ -19,7 +19,7 @@ async def report_agent(state: MarketState) -> MarketState:
     budget_usd = state.get("budget_usd", 300.0)
     warnings = state.get("warnings", [])
     assets = state.get("assets", [])
-
+    macro = state.get("macro_allocation") or {}
     # 🔥 Ordenar por score
     opportunities = sorted(
         opportunities,
@@ -43,9 +43,11 @@ async def report_agent(state: MarketState) -> MarketState:
         )
 
     print("[ReportAgent] Reporte generado.")
+    print("DEBUG REPORT MACRO IN:", macro)
 
     return {
         **state,
+        "macro_allocation": macro,
         "report": report,
         "warnings": warnings,
         "nodo_error": None,

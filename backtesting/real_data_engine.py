@@ -13,16 +13,17 @@ async def load_historical_prices(assets: List[str], days=90):
 
     for asset in assets:
         try:
-            ohlc = await get_ohlc_data(asset, days=days)
+            ohlc = await get_ohlc_data(asset, interval="1d", limit=days)
 
-            closes = [candle[4] for candle in ohlc]
+            closes = [float(candle["close"]) for candle in ohlc]
             data[asset] = closes
             
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.2)
 
         except Exception as e:
             print(f"[OHLC ERROR] {asset}: {e}")
             data[asset] = []
+    print("DATA POINTS:", {k: len(v) for k, v in data.items()})
 
     return data
 

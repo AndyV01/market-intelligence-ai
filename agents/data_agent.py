@@ -45,7 +45,7 @@ async def data_agent(state: MarketState) -> MarketState:
 
         for asset in assets:
             try:
-                ohlc = await get_ohlc_data(asset, limit=90)
+                ohlc = await get_ohlc_data(asset, interval="1d", limit=90)
                 closes = [candle["close"] for candle in ohlc]
                 historical_prices[asset] = closes
                 await asyncio.sleep(0.2)    
