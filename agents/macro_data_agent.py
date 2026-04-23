@@ -1,22 +1,7 @@
 import asyncio
-import httpx
-from datetime import datetime
 from graph.state import MarketState
 from utils.serializer import sanitize
 import yfinance as yf
-
-
-RAVA_URL = "https://www.rava.com/perfil"
-
-
-async def fetch_rava(symbol: str):
-    url = f"{RAVA_URL}/{symbol}"
-    async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.get(url)
-        if r.status_code != 200:
-            raise Exception(f"Error Rava {symbol}: {r.status_code}")
-        return r.text
-
 
 def extract_price(symbol: str):
     try:
@@ -24,104 +9,93 @@ def extract_price(symbol: str):
         data = ticker.history(period="1d")
 
         if data.empty:
-            print("NO DATA:", symbol)
             return None
 
-        price = float(data["Close"].iloc[-1])
-        print(f"{symbol} PRICE:", price)
-
-        return price
-
-    except Exception as e:
-        print("ERROR:", e)
+        return float(data["Close"].iloc[-1])
+    except:
         return None
 
 
-def compute_lecap_metrics(price: float, days_to_maturity: int, horizon_days: int = 30):
-    if not price or price <= 0:
-        return None, None, None
+def compute_tir(price, face=100, days=90):
+    if not price:
+        return None
+    return ((face - price) / price) * (365 / days)
 
-    face_value = 100.0
 
-    total_gain = face_value - price
-    tir_anual = (total_gain / price) * (365 / days_to_maturity)
-
-    rendimiento_30d = (tir_anual / 365) * horizon_days
-
-    return tir_anual, rendimiento_30d, horizon_days
+def compute_gain(capital, rate):
+    if not rate:
+        return 0
+    return capital * (rate / 365 * 30)
 
 
 async def macro_data_agent(state: MarketState) -> MarketState:
-    print("[MacroDataAgent] Fetching Argentina instruments...")
+    print("[MacroDataAgent] Argentina PRO...")
 
     warnings = state.get("warnings", [])
+    budget_ars = state.get("budget_ars", 500000)
 
-    try:
-        # LECAP
-        lecap_symbol = "S30S6"
-        lecap_price = extract_price(lecap_symbol)
+    #  UNIVERSO REALISTA
+    lecaps = ["S30S6", "S31E5", "S30J5"]
+    cer_bonds = ["TX26", "TX28"]
+    
+    argentina_data = {
+        "LECAP": [],
+        "CER": [],
+        "CAUCION": [],
+        "USD": state.get("dolar_rates", {})
+    }
 
-        lecap_days = 130
-        tir_anual, rendimiento_30d, horizon = compute_lecap_metrics(
-            lecap_price,
-            lecap_days,
-            30
-        )
+    # ───────────── LECAPS ─────────────
+    for sym in lecaps:
+        price = extract_price(sym)
+        tir = compute_tir(price, days=120)
 
-        # CER
-        cer_symbol = "TX26"
-        cer_price = extract_price(cer_symbol)
+        capital = budget_ars * 0.3 / len(lecaps)
+        gain = compute_gain(capital, tir)
 
-        cer_tir = 0.08
-
-        # USD
-        dolar = state.get("dolar_rates", {})
-
-        if lecap_price is None:
-            warnings.append(f"No price for {lecap_symbol}")
-
-        if cer_price is None:
-            warnings.append(f"No price for {cer_symbol}")
-
-        argentina_data = {
-            "LECAP": [
-                {
-                    "symbol": lecap_symbol,
-                    "price": lecap_price,
-                    "tir_anual": tir_anual,
-                    "rendimiento_30d": rendimiento_30d,
-                    "horizon_days": horizon,
-                }
-            ],
-            "CER": [
-                {
-                    "symbol": cer_symbol,
-                    "price": cer_price,
-                    "tir_real": cer_tir,
-                }
-            ],
-            "USD": {
-                "mep": dolar.get("mep", {}).get("avg"),
-                "ccl": dolar.get("ccl", {}).get("avg"),
-                "blue": dolar.get("blue", {}).get("avg"),
-            },
-        }
-
-        print("[MacroDataAgent] OK:", argentina_data)
-
-        return sanitize({
-            **state,
-            "argentina_instruments": argentina_data,
-            "warnings": warnings,
-            "nodo_error": None,
+        argentina_data["LECAP"].append({
+            "symbol": sym,
+            "price": price,
+            "tir": tir,
+            "capital": capital,
+            "gain_30d": gain,
         })
 
-    except Exception as e:
-        warnings.append(f"MacroDataAgent error: {str(e)}")
+    # ───────────── CER ─────────────
+    for sym in cer_bonds:
+        price = extract_price(sym)
 
-        return sanitize({
-            **state,
-            "argentina_instruments": {},
-            "warnings": warnings,
-            "nodo_error": None,
+        tir_real = 0.08  # luego lo mejorás
+
+        capital = budget_ars * 0.25 / len(cer_bonds)
+        gain = compute_gain(capital, tir_real)
+
+        argentina_data["CER"].append({
+            "symbol": sym,
+            "price": price,
+            "tir_real": tir_real,
+            "capital": capital,
+            "gain_30d": gain,
         })
+
+    # ───────────── CAUCIÓN ─────────────
+    caucion_rate = 0.6  # 60% anual aprox
+
+    capital = budget_ars * 0.15
+    gain = compute_gain(capital, caucion_rate)
+
+    argentina_data["CAUCION"].append({
+        "symbol": "CAUCION",
+        "rate": caucion_rate,
+        "capital": capital,
+        "gain_30d": gain,
+    })
+
+    print("[MacroDataAgent] OK:", argentina_data)
+
+    return sanitize({
+        **state,
+        "argentina_instruments": argentina_data,
+        "warnings": warnings,
+        "nodo_error": None,
+    })

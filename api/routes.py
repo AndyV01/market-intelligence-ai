@@ -20,11 +20,11 @@ class AnalysisRequest(BaseModel):
         description="Lista de símbolos a analizar",
         example=["BTC", "ETH", "SOL"],
     )
-    budget_usd: float = Field(
-        default=300.0,
-        ge=10,
-        le=100000,
-        description="Presupuesto de inversión en USD",
+    budget_ars: float = Field(
+        default=500000,
+        ge=1000,
+        le=1000000,
+        description="Presupuesto de inversión en ARS",
     )
 
 class AnalysisStatus(BaseModel):
@@ -55,7 +55,7 @@ async def start_analysis(request: AnalysisRequest, background_tasks: BackgroundT
     job_id = str(uuid.uuid4())[:8]
     _jobs[job_id] = {"status": "pending", "result": None, "error": None}
 
-    background_tasks.add_task(_run_analysis, job_id, assets, request.budget_usd)
+    background_tasks.add_task(_run_analysis, job_id, assets, request.budget_ars)
 
     return AnalysisStatus(
         job_id=job_id,
@@ -105,7 +105,7 @@ async def run_analysis_sync(request: AnalysisRequest):
 
     initial_state = {
         "assets": assets,
-        "budget_usd": request.budget_usd,
+        "budget_ars": request.budget_ars,
         "raw_prices": {},
         "raw_news": [],
         "dolar_rates": {},
@@ -156,13 +156,13 @@ async def get_supported_assets():
 
 # ── Background task ───────────────────────────────────────────────────────────
 
-async def _run_analysis(job_id: str, assets: List[str], budget_usd: float):
+async def _run_analysis(job_id: str, assets: List[str], budget_ars: float):
     _jobs[job_id]["status"] = "running"
     thread_id = str(uuid.uuid4())
 
     initial_state = {
         "assets": assets,
-        "budget_usd": budget_usd,
+        "budget_ars": budget_ars,
         "raw_prices": {},
         "raw_news": [],
         "dolar_rates": {},

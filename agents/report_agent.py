@@ -16,11 +16,11 @@ async def report_agent(state: MarketState) -> MarketState:
 
     opportunities = state.get("opportunities", [])
     dolar_rates = state.get("dolar_rates", {})
-    budget_usd = state.get("budget_usd", 300.0)
+    budget_ars = state.get("budget_ars", 500000)
     warnings = state.get("warnings", [])
     assets = state.get("assets", [])
     macro = state.get("macro_allocation") or {}
-    # 🔥 Ordenar por score
+    # Ordenar por score
     opportunities = sorted(
         opportunities,
         key=lambda x: x.get("final_score", 0),
@@ -31,7 +31,7 @@ async def report_agent(state: MarketState) -> MarketState:
         report = await _generate_llm_report(
             opportunities,
             dolar_rates,
-            budget_usd,
+            budget_ars,
             assets
         )
     except Exception as e:
@@ -39,7 +39,7 @@ async def report_agent(state: MarketState) -> MarketState:
         report = _generate_fallback_report(
             opportunities,
             dolar_rates,
-            budget_usd
+            budget_ars
         )
 
     print("[ReportAgent] Reporte generado.")
@@ -57,7 +57,7 @@ async def report_agent(state: MarketState) -> MarketState:
 async def _generate_llm_report(
     opportunities: list,
     dolar_rates: dict,
-    budget_usd: float,
+    budget_ars: float,
     assets: list,
 ) -> str:
 
@@ -89,10 +89,10 @@ async def _generate_llm_report(
         api_key=groq_api_key,
     )
 
-    # 🔥 limitar ruido (top 5)
+    #  limitar ruido (top 5)
     opportunities = opportunities[:5]
 
-    # 🔥 separar BUY vs AVOID
+    #  separar BUY vs AVOID
     buy = [o for o in opportunities if o["signal"] in ("BUY", "STRONG_BUY")]
     avoid = [o for o in opportunities if o["signal"] in ("WAIT", "SELL", "AVOID")]
 
@@ -101,9 +101,9 @@ async def _generate_llm_report(
             "asset": o["asset"],
             "signal": o["signal"],
             "score": o["final_score"],
-            "price_usd": o["price_usd"],
+            "price_usd": o.get("price_usd", "N/D"),
             "change_24h": o.get("change_24h", 0),
-            "suggested_usd": o["suggested_amount_usd"],
+            "suggested_ars": o.get("suggested_amount_ars", 0),
             "confidence": (
                 "high" if o["final_score"] > 80
                 else "medium" if o["final_score"] > 60
@@ -133,7 +133,7 @@ Reglas estrictas:
 """)
 
     human_msg = HumanMessage(content=f"""
-Genera un reporte de mercado conciso para un inversor argentino con ${budget_usd} USD disponibles.
+Genera un reporte de mercado conciso para un inversor argentino con ${budget_ars} ARS disponibles.
 
 FECHA Y HORA: {timestamp}
 DÓLAR CRYPTO: ${crypto_rate} ARS
@@ -173,7 +173,7 @@ Máximo 400 palabras.
 def _generate_fallback_report(
     opportunities: list,
     dolar_rates: dict,
-    budget_usd: float,
+    budget_ars: float,
 ) -> str:
     """Reporte estructurado sin LLM como fallback."""
     timestamp = datetime.now().strftime("%d/%m/%Y %H:%M")
@@ -183,7 +183,7 @@ def _generate_fallback_report(
     lines = [
         f"📊 MARKET INTELLIGENCE REPORT — {timestamp}",
         f"💵 Dólar Crypto: ${crypto_rate} ARS | Dólar Blue: ${blue_rate} ARS",
-        f"💰 Presupuesto: ${budget_usd} USD",
+        f"💰 Presupuesto: ${budget_ars} ARS",
         "",
         "=" * 50,
         "🎯 SEÑALES DETECTADAS",
@@ -197,7 +197,7 @@ def _generate_fallback_report(
         for o in buy_signals:
             lines.append(f"\n✅ {o['asset']} — {o['signal']} (Score: {o['final_score']}/100)")
             lines.append(f"   Precio: ${o['price_usd']:,.2f} USD | Cambio 24h: {o.get('change_24h', 0):.1f}%")
-            lines.append(f"   Inversión sugerida: ${o['suggested_amount_usd']} USD")
+            lines.append(f"   Inversión sugerida: ${o.get('suggested_amount_ars', 0):,.0f} ARS")
             for sig in o.get("key_signals", []):
                 lines.append(f"   {sig}")
     else:

@@ -6,7 +6,7 @@ async def asset_allocator_agent(state: MarketState) -> MarketState:
     print("[AssetAllocator] Asignando capital multi-asset...")
 
     opportunities = state.get("opportunities", [])
-    budget = state.get("budget_usd", 300.0)
+    budget_ars = state.get("budget_ars", 500000)
     warnings = state.get("warnings", [])
 
     # 🔹 Detectar régimen desde warnings
@@ -59,8 +59,8 @@ async def asset_allocator_agent(state: MarketState) -> MarketState:
     # 🔹 Convertir a montos
     # ─────────────────────────────────────────────
 
-    allocation_usd = {
-        k: round(v * budget, 2)
+    allocation_ars = {
+        k: round(v * budget_ars, 2)
         for k, v in allocation.items()
     }
 
@@ -71,7 +71,7 @@ async def asset_allocator_agent(state: MarketState) -> MarketState:
     **state,
     "macro_allocation": allocation,
     "asset_allocation": allocation,
-    "asset_allocation_usd": allocation_usd,
+    "asset_allocation_ars": allocation_ars,
     "nodo_error": None,
     }
 

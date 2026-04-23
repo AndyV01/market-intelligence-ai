@@ -27,7 +27,7 @@ async def opportunity_agent(state: MarketState) -> MarketState:
     raw_prices = state.get("raw_prices", {})
     dolar_rates = state.get("dolar_rates", {})
     historical_prices = state.get("historical_prices", {})
-    budget_usd = state.get("budget_usd", 300.0)
+    budget_ars = state.get("budget_ars", 500000)
     warnings = state.get("warnings", [])
 
     # ─────────────────────────────────────────
@@ -99,7 +99,7 @@ async def opportunity_agent(state: MarketState) -> MarketState:
         signal = _get_signal(final_score)
 
         allocation_pct = _dynamic_allocation(signal, final_score)
-        suggested_amount = round(budget_usd * allocation_pct / 100, 2)
+        suggested_amount = round(budget_ars * allocation_pct / 100, 2)
 
         price_usd = price_data.get("price_usd", 0)
         crypto_rate = dolar_rates.get("crypto", {}).get("avg")

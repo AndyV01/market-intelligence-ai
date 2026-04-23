@@ -1,12 +1,15 @@
 import Loader from "./Loader";
+import LiveNumber from "./LiveNumber";
 
 export default function Dashboard({ data, loading }) {
   if (loading) return <Loader />;
   if (!data) return <p>No hay datos aún</p>;
 
-  const macro = data.macro_allocation;
   const argentina = data.argentina_instruments;
-  const budget = data.budget_usd || 300;
+
+  function formatARS(n) {
+    return `$${Number(n || 0).toLocaleString("es-AR")}`;
+  }
 
   return (
     <div style={{ padding: 24, color: "#fff" }}>
@@ -18,81 +21,60 @@ export default function Dashboard({ data, loading }) {
 
       {/* 🇦🇷 Instrumentos */}
       {argentina && (
-        <Section title="🇦🇷 Instrumentos">
+        <Section title="🇦🇷 Portfolio Argentina ($500.000 ARS)">
           <div style={grid}>
 
             {/* LECAP */}
-            {argentina.LECAP?.map((i) => {
-              const alloc = (macro?.LECAP || 0) * budget;
-
-              const gain = i.rendimiento_30d
-                ? alloc * i.rendimiento_30d
-                : 0;
-
-              return (
-                <InstrumentCard
-                  key={i.symbol}
-                  title={`${i.symbol}`}
-                  type="LECAP"
-                  capital={alloc}
-                  rate={i.tir_anual}
-                  gain={gain}
-                  horizon={i.horizon_days}
-                />
-              );
-            })}
+            {argentina.LECAP?.map((i) => (
+              <InstrumentCard
+                key={i.symbol}
+                title={i.symbol}
+                type="LECAP"
+                capital={i.capital}
+                rate={i.tir || i.tir_anual}
+                gain={i.gain_30d || i.ganancia_30d_ars}
+                horizon={30}
+              />
+            ))}
 
             {/* CER */}
-            {argentina.CER?.map((i) => {
-              const alloc = (macro?.CER || 0) * budget;
+            {argentina.CER?.map((i) => (
+              <InstrumentCard
+                key={i.symbol}
+                title={i.symbol}
+                type="CER"
+                capital={i.capital}
+                rate={i.tir_real}
+                gain={i.gain_30d || i.ganancia_30d_ars}
+                horizon={30}
+              />
+            ))}
 
-              // asumimos TIR anual → lo bajamos a 30 días
-              const rate30d = (i.tir_real / 365) * 30;
-              const gain = alloc * rate30d;
-
-              return (
-                <InstrumentCard
-                  key={i.symbol}
-                  title={`${i.symbol}`}
-                  type="CER"
-                  capital={alloc}
-                  rate={i.tir_real}
-                  gain={gain}
-                  horizon={30}
-                />
-              );
-            })}
-
-            {/* USD (proxy carry 0% → solo informativo) */}
-            {argentina.USD && (
-              <div style={card}>
-                <h3>Dólar</h3>
-                <span style={tag}>FX</span>
-
-                <p>MEP: ${argentina.USD.mep}</p>
-                <p>CCL: ${argentina.USD.ccl}</p>
-                <p>Blue: ${argentina.USD.blue}</p>
-
-                <p style={{ opacity: 0.6 }}>
-                  Sin rendimiento directo (reserva de valor)
-                </p>
-              </div>
-            )}
+            {/* CAUCIÓN */}
+            {argentina.CAUCION?.map((i) => (
+              <InstrumentCard
+                key={i.symbol || "caucion"}
+                title="Caución bursátil"
+                type="Money Market"
+                capital={i.capital}
+                rate={i.rate}
+                gain={i.gain_30d}
+                horizon={30}
+              />
+            ))}
 
           </div>
         </Section>
       )}
 
-      {/* 🚀 Oportunidades (MEJORADAS, NO BORRADAS) */}
+      {/* 🚀 Oportunidades */}
       <Section title="🚀 Oportunidades">
         <div style={grid}>
 
           {data.opportunities?.map((op) => (
             <div key={op.asset} style={card}>
 
-              <h3>
-                {op.asset}
-              </h3>
+              <h3>{op.asset}</h3>
 
               <span style={signalTag(op.signal)}>
                 {op.signal}
@@ -118,41 +100,58 @@ export default function Dashboard({ data, loading }) {
   );
 }
 
-/* ========================= */
-/* COMPONENTE REUTILIZABLE */
-/* ========================= */
+//////////////////////////////////////////////////
+// COMPONENTE CARD (ÚNICO Y CORRECTO)
+//////////////////////////////////////////////////
 
 function InstrumentCard({ title, type, capital, rate, gain, horizon }) {
-  const isBad = gain <= 0;
-  const finalValue = capital + gain;
+  const isBad = (gain || 0) <= 0;
+  const finalValue = (capital || 0) + (gain || 0);
 
   return (
-    <div style={card}>
-      <h3>{title}</h3>
-      <span style={tag}>{type}</span>
+    <div style={{
+      padding: 14,
+      borderRadius: 12,
+      background: "rgba(10, 14, 25, 0.65)",
+      backdropFilter: "blur(12px)",
+      border: `1px solid ${isBad ? "rgba(255,80,80,0.25)" : "rgba(0,255,150,0.25)"}`,
+      boxShadow: isBad
+        ? "0 0 20px rgba(255,80,80,0.08)"
+        : "0 0 20px rgba(0,255,150,0.08)",
+      fontSize: 13,
+      transition: "0.2s ease",
+    }}>
 
-      <p>Capital: ${capital.toFixed(2)}</p>
-      <p>Tasa anual: {(rate * 100).toFixed(1)}%</p>
+      <div style={{ display: "flex", justifyContent: "space-between" }}>
+        <strong style={{ fontSize: 16 }}>{title}</strong>
+        <span style={{ opacity: 0.6 }}>{type}</span>
+      </div>
+
+      <p>Capital: ${Number(capital || 0).toFixed(2)}</p>
+      <p>Tasa anual: {((rate || 0) * 100).toFixed(1)}%</p>
       <p>Horizonte: {horizon} días</p>
 
-      <p style={{ color: isBad ? "#ff5252" : "#00e676", fontWeight: "bold" }}>
-        Ganancia: ${gain.toFixed(2)}
+      <p style={{
+        color: isBad ? "#ff5252" : "#00e676",
+        fontWeight: "bold"
+      }}>
+        Ganancia 30d: $<LiveNumber value={gain} />
       </p>
 
-      <p>Final: ${finalValue.toFixed(2)}</p>
+      <p>Final: $<LiveNumber value={finalValue} /></p>
 
       {isBad && (
-        <p style={warning}>
-          ⚠️ No conviene invertir ahora
+        <p style={{ color: "#ff5252", fontSize: 12 }}>
+          ⚠ No conviene invertir ahora
         </p>
       )}
     </div>
   );
 }
 
-/* ========================= */
-/* UI */
-/* ========================= */
+//////////////////////////////////////////////////
+// UI
+//////////////////////////////////////////////////
 
 function Section({ title, children }) {
   return (
@@ -164,9 +163,9 @@ function Section({ title, children }) {
 }
 
 const grid = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 20,
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+  gap: 16,
 };
 
 const card = {
@@ -175,24 +174,7 @@ const card = {
   border: "1px solid rgba(255,255,255,0.1)",
   borderRadius: 18,
   padding: 20,
-  width: 260,
   boxShadow: "0 10px 40px rgba(0,0,0,0.3)",
-  transition: "0.2s",
-};
-
-const tag = {
-  fontSize: 12,
-  padding: "4px 10px",
-  background: "rgba(255,255,255,0.1)",
-  borderRadius: 10,
-  display: "inline-block",
-  marginBottom: 10,
-};
-
-const warning = {
-  color: "#ff5252",
-  fontWeight: "bold",
-  marginTop: 10,
 };
 
 const signalTag = (signal) => ({

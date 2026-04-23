@@ -16,10 +16,11 @@ async def portfolio_optimizer_agent(state: MarketState) -> MarketState:
 
     crypto_pct = macro.get("CRYPTO", 0)
 
-    budget = state.get("budget_usd", 300.0)
-    crypto_budget = budget * crypto_pct
+    budget_ars = state.get("budget_ars", 500000)
+    crypto_budget = budget_ars * crypto_pct
+    
     warnings = state.get("warnings", [])
-    macro = state.get("macro_allocation")
+    
     investable = [
         o for o in opportunities
         if o["signal"] in ("STRONG_BUY", "BUY")
@@ -29,6 +30,8 @@ async def portfolio_optimizer_agent(state: MarketState) -> MarketState:
         warnings.append("Muy pocos activos para optimización real")
         return {
         **state,
+        "opportunities": opportunities,
+        "macro_allocation": state.get("macro_allocation", {}),
         "warnings": warnings,
     }
 
@@ -179,11 +182,12 @@ async def portfolio_optimizer_agent(state: MarketState) -> MarketState:
         optimized.append({
             **o,
             "optimized_allocation_pct": allocation_pct,
-            "optimized_amount_usd": amount,
+            "optimized_amount_ars": amount,
         })
+    total_invested = sum(final_weights.values()) * crypto_budget    
 
     print(f"[PortfolioOptimizer] Sharpe approx: {round(sharpe, 3)}")
-    print("[PortfolioOptimizer] Optimización completada")
+    print(f"[PortfolioOptimizer] Capital invertido: {round(total_invested, 2)} ARS")
     
     return {
         **state,

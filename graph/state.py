@@ -8,7 +8,7 @@ class MarketState(TypedDict, total=False):
 
     # Input
     assets: List[str]
-    budget_usd: float
+    budget_ars: float
 
     # Data Agent output
     raw_prices: Dict[str, Any]

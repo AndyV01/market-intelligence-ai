@@ -31,7 +31,7 @@ async def run_real_backtest(assets, days=60):
 
         state = {
             "assets": assets,
-            "budget_usd": simulator.equity[-1],
+            "budget_ars": simulator.equity[-1],
             "raw_prices": {},
             "raw_news": [],
             "dolar_rates": {},

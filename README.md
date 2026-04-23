@@ -55,7 +55,7 @@ Análisis completo sincrónico (espera el resultado).
 ```json
 {
   "assets": ["BTC", "ETH", "SOL"],
-  "budget_usd": 300
+  "budget_arg": 500000
 }
 ```
 

@@ -8,7 +8,7 @@ export async function runAnalysisSync() {
     },
     body: JSON.stringify({
       assets: ["BTC", "ETH", "SOL"],
-      budget_usd: 300
+      budget_ars: 500000
     })
   });
 
