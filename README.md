@@ -1,90 +1,250 @@
 # 🧠 Market Intelligence AI
 
-Sistema multi-agente de análisis de criptomonedas construido con **LangGraph + FastAPI**.
-Pensado para el mercado argentino (Cocos Crypto / dólar MEP / CCL).
+Sistema **multi-agente de análisis financiero** enfocado en el mercado argentino.
+
+Combina:
+- 📊 Criptomonedas (análisis técnico + sentiment)
+- 🇦🇷 Instrumentos locales (LECAP, CER, cauciones)
+- 💰 Asignación inteligente de portfolio
+- 🖥️ UI estilo terminal financiero (tipo Bloomberg)
+
+---
 
 ## 🏗️ Arquitectura
 
 ```
-DataAgent → AnalysisAgent → OpportunityAgent → ReportAgent
-   │               │                │                │
-CoinGecko      RSI/MACD/BB      Score 0-100     Groq LLM
-CryptoPanic    Groq LLM         Señal BUY/SELL   Reporte ES
-DolarAPI       Sentiment
+DataAgent
+   ↓
+AnalysisAgent (TA + Sentiment)
+   ↓
+OpportunityAgent (scoring + señales)
+   ↓
+AssetAllocator (macro allocation ARS)
+   ↓
+PortfolioOptimizer (risk parity + sharpe)
+   ↓
+MacroDataAgent (LECAP / CER / USD)
+   ↓
+ReportAgent (LLM + fallback)
 ```
+
+---
+
+## 🚀 Qué hace el sistema
+
+### 📊 Crypto
+- RSI, MACD, Bollinger Bands  
+- Sentiment con LLM (Groq)  
+- Score cuantitativo (0–100)  
+- Señales: BUY / SELL / WAIT  
+
+---
+
+### 🇦🇷 Portfolio Argentina
+
+Con presupuesto configurable (default: **$500.000 ARS**):
+
+- 🧾 LECAP (tasa fija)  
+- 📈 Bonos CER (inflación)  
+- 💵 USD (MEP / CCL / Blue)  
+- 🏦 Cauciones (money market)  
+
+Todo proyectado a **30 días**
+
+Ejemplo:
+
+```
+Capital: $90.000
+TIR anual: 85%
+Ganancia estimada (30d): $6.300
+Valor final: $96.300
+```
+
+---
+
+### 🧠 Asset Allocation
+
+El sistema detecta el régimen de mercado:
+
+- 🟢 risk_on → más crypto  
+- 🔴 risk_off → más tasa / CER / USD  
+- 🟡 neutral → balanceado  
+
+---
+
+### ⚙️ Portfolio Optimization
+
+- Risk parity  
+- Sharpe-like optimization  
+- Volatility targeting  
+- Control de riesgo total  
+
+---
+
+## 🖥️ Frontend
+
+- ✨ Glassmorphism cards  
+- 📈 Animaciones tipo mercado  
+- 🔢 Números dinámicos  
+- 🏆 Ranking automático  
+- 🎨 UI estilo Wall Street  
+
+---
 
 ## 🚀 Setup local
 
+### Backend
+
 ```bash
-# 1. Clonar y entrar al proyecto
 git clone https://github.com/AndyV01/market-intelligence-ai
 cd market-intelligence-ai
 
-# 2. Crear entorno virtual
 python -m venv venv
 source venv/bin/activate  # Linux/Mac
 # venv\Scripts\activate   # Windows
 
-# 3. Instalar dependencias
 pip install -r requirements.txt
 
-# 4. Configurar variables de entorno
 cp .env.example .env
-# Editá .env y agregá tu GROQ_API_KEY
+# agregar GROQ_API_KEY
 
-# 5. Levantar el servidor
 uvicorn main:app --reload --port 8000
 ```
 
-Documentación interactiva: http://localhost:8000/docs
+---
 
-## 🔑 APIs necesarias
+### Frontend
 
-| API | Requiere key | Cómo obtenerla |
-|-----|-------------|----------------|
-| CoinGecko | ❌ No | Free tier sin registro |
-| dolarapi.com | ❌ No | Free, sin registro |
-| Groq (Llama 3) | ✅ Sí | [console.groq.com](https://console.groq.com) — gratis |
-| CryptoPanic | Opcional | [cryptopanic.com](https://cryptopanic.com/developers/api/) — free tier |
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-## 📡 Endpoints principales
+---
 
-### `POST /api/v1/analyze/sync`
-Análisis completo sincrónico (espera el resultado).
+## 🔑 APIs utilizadas
+
+| API | Key | Uso |
+|-----|----|-----|
+| CoinGecko | ❌ | precios crypto |
+| Binance | ❌ | OHLC histórico |
+| dolarapi | ❌ | dólar ARS |
+| Groq | ✅ | LLM |
+| CryptoPanic | opcional | noticias |
+
+---
+
+## 📡 Endpoints
+
+### POST `/api/v1/analyze/sync`
 
 ```json
 {
   "assets": ["BTC", "ETH", "SOL"],
-  "budget_arg": 500000
+  "budget_ars": 500000
 }
 ```
 
-### `POST /api/v1/analyze`
-Análisis asincrónico (retorna job_id).
+---
 
-### `GET /api/v1/analyze/{job_id}`
-Consulta el resultado de un análisis iniciado.
+### POST `/api/v1/analyze`
 
-### `GET /api/v1/assets/supported`
-Lista de assets disponibles.
+Análisis asincrónico (devuelve `job_id`)
 
-## 🎯 Assets soportados
-BTC, ETH, SOL, BNB, ADA, XRP, MATIC, DOT, AVAX, USDT
+---
 
-## 🚢 Deploy en Render (free tier)
+### GET `/api/v1/analyze/{job_id}`
 
-1. Crear nuevo Web Service en render.com
-2. Build command: `pip install -r requirements.txt`
-3. Start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-4. Agregar env vars: `GROQ_API_KEY`
+Consulta estado del análisis
+
+---
+
+### GET `/api/v1/assets/supported`
+
+Lista de assets disponibles
+
+---
+
+## 📦 Output
+
+El sistema devuelve:
+
+- report  
+- opportunities  
+- macro_allocation  
+- argentina_instruments  
+- dolar_rates  
+- warnings  
+
+---
+
+## 🧠 Ejemplo de salida
+
+```
+📊 RESUMEN DEL MERCADO:
+Momentum positivo en BTC, debilidad en ETH.
+
+🎯 OPORTUNIDADES:
+- BTC → BUY (score 78)
+
+⚠️ EVITAR:
+- ETH → WAIT
+
+💰 ASIGNACIÓN:
+Crypto: 30%
+LECAP: 30%
+CER: 25%
+USD: 15%
+```
+
+---
+
+## 🚢 Deploy (Render)
+
+Build:
+```bash
+pip install -r requirements.txt
+```
+
+Start:
+```bash
+uvicorn main:app --host 0.0.0.0 --port $PORT
+```
+
+Env:
+```
+GROQ_API_KEY=xxxx
+```
+
+---
 
 ## ⚠️ Disclaimer
-Este sistema es **informativo**. No constituye asesoramiento financiero.
-Invertir en criptomonedas implica riesgo de pérdida total del capital.
 
-## 🛠️ Tech stack
-- **FastAPI** — backend REST
-- **LangGraph** — orquestación multi-agente (StateGraph + MemorySaver)
-- **LangChain + Groq** — LLM (Llama 3.1 8B Instant)
-- **pandas / numpy** — indicadores técnicos (RSI, MACD, Bollinger)
-- **httpx** — llamadas async a APIs externas
+Este sistema es informativo.  
+No constituye asesoramiento financiero.  
+Invertir implica riesgo de pérdida de capital.
+
+---
+
+## 🛠️ Tech Stack
+
+### Backend
+- FastAPI  
+- LangGraph  
+- LangChain + Groq  
+- numpy / pandas  
+
+### Frontend
+- React + Vite  
+- UI custom (glass + trading style)  
+
+---
+
+## 🧪 Roadmap
+
+- 📊 Mini charts por instrumento  
+- 📡 Datos en tiempo real  
+- 🧠 Modelos predictivos  
+- 📉 Backtesting  
+- 🔔 Alertas inteligentes  
