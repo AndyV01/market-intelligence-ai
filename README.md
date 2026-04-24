@@ -257,6 +257,39 @@ npm run dev
 
 ---
 
+## 🔁 CI/CD (GitHub Actions)
+
+El repositorio incluye dos workflows automáticos en `.github/workflows`:
+
+### CI (`ci.yml`)
+
+Se ejecuta en cada `pull_request` y en cada `push` a cualquier rama.
+
+- **Backend (Python 3.11)**
+  - Instala dependencias desde `requirements.txt`.
+  - Ejecuta chequeo de sintaxis con `python -m compileall .`.
+  - Corre smoke tests de API (`/health` y `/api/v1/assets/supported`) usando `FastAPI TestClient`.
+- **Frontend (Node 20)**
+  - Instala dependencias con `npm ci`.
+  - Compila el proyecto con `npm run build`.
+
+Además, usa `concurrency` para cancelar ejecuciones previas del mismo branch y evitar pipelines duplicados.
+
+### CD (`cd.yml`)
+
+Se ejecuta cuando hay `push` a `main` o manualmente desde `workflow_dispatch`.
+
+- Construye y empaqueta backend como `dist/backend.tar.gz`.
+- Compila frontend en `frontend/dist`.
+- Publica ambos artefactos con `actions/upload-artifact`:
+  - `frontend-dist`
+  - `backend-source`
+- Define retención de artefactos por **14 días**.
+
+Este CD actualmente está orientado a **entrega de artefactos** (no despliega a infraestructura productiva).
+
+---
+
 ## 🔌 Integraciones/servicios usados
 
 - CoinGecko
