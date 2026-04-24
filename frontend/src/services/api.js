@@ -1,4 +1,4 @@
-const API_URL = "http://localhost:8000/api/v1";
+const API_URL = "https://market-intelligence-ai.onrender.com/api/v1";
 
 export async function runAnalysisSync() {
   const res = await fetch(`${API_URL}/analyze/sync`, {

@@ -5,7 +5,7 @@ import uuid
 from graph.market_graph import market_graph
 from utils.serializer import sanitize
 
-router = APIRouter(prefix="https://market-intelligence-ai.onrender.com/api/v1", tags=["market-intelligence"])
+router = APIRouter(prefix="/api/v1", tags=["market-intelligence"])
 
 # Estado simple en memoria para jobs asincrónicos
 # En producción usar Redis o base de datos
