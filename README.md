@@ -1,93 +1,229 @@
 # 🧠 Market Intelligence AI
 
-Sistema **multi-agente de análisis financiero** enfocado en el mercado argentino.
+Sistema multi‑agente para análisis de cripto y construcción de portafolio en ARS.
 
-Combina:
-- 📊 Criptomonedas (análisis técnico + sentiment)
-- 🇦🇷 Instrumentos locales (LECAP, CER, cauciones)
-- 💰 Asignación inteligente de portfolio
-- 🖥️ UI estilo terminal financiero (tipo Bloomberg)
+## 🎯 Qué resuelve
+
+Este proyecto combina en un único flujo:
+
+- Recolección de precios crypto, noticias y dólar argentino.
+- Cálculo de indicadores técnicos por activo.
+- Scoring cuantitativo + sentimiento (LLM con fallback heurístico).
+- Detección de oportunidades (BUY / STRONG_BUY / WAIT / SELL / AVOID).
+- Asignación macro por régimen de mercado (risk_on / neutral / risk_off).
+- Optimización de la porción crypto (risk parity + sharpe-like + control de riesgo).
+- Cálculo de instrumentos argentinos (LECAP, CER, caución, USD).
+- Generación de reporte final (LLM + fallback).
 
 ---
 
-## 🏗️ Arquitectura
+## 🏗️ Arquitectura (LangGraph)
 
-```
+```text
 DataAgent
-   ↓
-AnalysisAgent (TA + Sentiment)
-   ↓
-OpportunityAgent (scoring + señales)
-   ↓
-AssetAllocator (macro allocation ARS)
-   ↓
-PortfolioOptimizer (risk parity + sharpe)
-   ↓
-MacroDataAgent (LECAP / CER / USD)
-   ↓
-ReportAgent (LLM + fallback)
+  └─ obtiene precios, noticias, dólar y OHLC histórico
+      ↓
+MacroDataAgent
+  └─ construye universo ARS (LECAP, CER, caución, USD)
+      ↓
+AnalysisAgent
+  └─ indicadores técnicos + sentiment (LLM/fallback)
+      ↓
+OpportunityAgent
+  └─ scoring cuantitativo + señales + régimen de mercado
+      ↓
+AssetAllocatorAgent
+  └─ asignación macro (LECAP/CER/USD/CRYPTO)
+      ↓
+PortfolioOptimizerAgent
+  └─ optimiza pesos crypto y montos sugeridos
+      ↓
+ReportAgent
+  └─ reporte ejecutivo en español
+```
+
+El grafo incluye nodo de error para fallos críticos y propagación de `warnings` en todo el pipeline.
+
+---
+
+## 🔍 Funcionalidades del sistema (detalle)
+
+### 1) Data ingestion
+
+- **Precios spot crypto** por símbolo soportado.
+- **Noticias crypto** para análisis de sentimiento.
+- **Dólar ARS** (crypto/blue y otras cotizaciones provistas por API).
+- **Histórico OHLC (90 velas por activo)** para detección de tendencia/volatilidad de régimen.
+
+### 2) Análisis técnico + sentimiento
+
+- Indicadores:
+  - RSI
+  - MACD (incluye detección de crossover)
+  - Bollinger Bands (incluye ancho de banda)
+- Sentimiento:
+  - Primario: LLM (Groq, `llama-3.3-70b-versatile`) con salida JSON validada.
+  - Secundario: fallback heurístico por `sentiment_hint` de noticias.
+  - Fusión final: **70% LLM + 30% fallback**.
+
+### 3) Motor de oportunidades
+
+- Scoring por activo (0–100) con pesos:
+  - Technical: 40%
+  - Momentum: 25%
+  - Volatility: 15%
+  - Sentiment: 20%
+- Señales:
+  - `STRONG_BUY`, `BUY`, `WAIT`, `SELL`, `AVOID`
+- Filtros adicionales de entrada:
+  - score mínimo,
+  - momentum mínimo,
+  - umbrales más estrictos en `risk_off`.
+- Salida por activo:
+  - score total y parciales,
+  - precio USD y referencia ARS,
+  - señal,
+  - asignación sugerida,
+  - key signals interpretables.
+
+### 4) Detección de régimen
+
+Se infiere con BTC histórico:
+
+- Tendencia (MA20 vs MA50 + precio actual).
+- Volatilidad rolling reciente.
+
+Resultado:
+
+- `risk_on`
+- `neutral`
+- `risk_off`
+
+En `risk_off`, el sistema aplica reglas más defensivas.
+
+### 5) Asignación macro (Argentina + crypto)
+
+Distribuye presupuesto en:
+
+- **LECAP**
+- **CER**
+- **USD**
+- **CRYPTO**
+
+La distribución cambia según régimen y calidad de oportunidades detectadas.
+
+### 6) Optimización de portafolio crypto
+
+Sobre oportunidades invertibles (`BUY`/`STRONG_BUY`):
+
+- Risk parity (inverso de volatilidad)
+- Ajuste sharpe-like
+- Matriz de correlación simplificada
+- Caps por activo y mínimo por posición
+- Volatility targeting
+- Límite de riesgo total del bloque crypto
+
+Salida:
+
+- `optimized_allocation_pct`
+- `optimized_amount_ars`
+
+### 7) Instrumentos argentinos (bloque macro)
+
+Incluye estimaciones para:
+
+- **LECAP** (TIR estimada desde precio)
+- **Bonos CER** (tir real placeholder configurable)
+- **Caución bursátil** (tasa anual aproximada)
+- **USD** (cotizaciones recolectadas)
+
+Con proyección de ganancia a 30 días para el presupuesto asignado.
+
+### 8) Reporte automático
+
+- Si hay `GROQ_API_KEY`: reporte narrativo con formato ejecutivo.
+- Si falla/no hay LLM: fallback determinístico estructurado.
+- Siempre incluye advertencia de riesgo.
+
+---
+
+## 🧪 Backtesting
+
+El repositorio incluye dos caminos:
+
+1. **Simulación placeholder** (`backtesting/runner.py`) con retornos aleatorios.
+2. **Backtest con datos reales** (`backtesting/run_real_backtest.py`) que:
+   - carga históricos,
+   - reconstruye estado por paso temporal,
+   - ejecuta `opportunity_agent` + `portfolio_optimizer_agent`,
+   - simula equity curve.
+
+Script rápido:
+
+```bash
+python run_backtest.py
 ```
 
 ---
 
-## 🚀 Qué hace el sistema
+## 🌐 API (FastAPI)
 
-### 📊 Crypto
-- RSI, MACD, Bollinger Bands  
-- Sentiment con LLM (Groq)  
-- Score cuantitativo (0–100)  
-- Señales: BUY / SELL / WAIT  
+Base: `http://localhost:8000/api/v1`
 
----
+### `POST /analyze/sync`
+Ejecuta el pipeline completo y devuelve resultado final.
 
-### 🇦🇷 Portfolio Argentina
+Payload ejemplo:
 
-Con presupuesto configurable (default: **$500.000 ARS**):
-
-- 🧾 LECAP (tasa fija)  
-- 📈 Bonos CER (inflación)  
-- 💵 USD (MEP / CCL / Blue)  
-- 🏦 Cauciones (money market)  
-
-Todo proyectado a **30 días**
-
-Ejemplo:
-
-```
-Capital: $90.000
-TIR anual: 85%
-Ganancia estimada (30d): $6.300
-Valor final: $96.300
+```json
+{
+  "assets": ["BTC", "ETH", "SOL"],
+  "budget_ars": 500000
+}
 ```
 
+### `POST /analyze`
+Inicia análisis async y devuelve `job_id`.
+
+### `GET /analyze/{job_id}`
+Consulta estado/resultados del job async.
+
+### `GET /assets/supported`
+Lista símbolos soportados.
+
+### `GET /health`
+Healthcheck del servicio + estado de configuración Groq.
+
+### `GET /`
+Metadata del servicio.
+
 ---
 
-### 🧠 Asset Allocation
+## 📦 Estructura de respuesta principal
 
-El sistema detecta el régimen de mercado:
+`/analyze/sync` devuelve (entre otros):
 
-- 🟢 risk_on → más crypto  
-- 🔴 risk_off → más tasa / CER / USD  
-- 🟡 neutral → balanceado  
-
----
-
-### ⚙️ Portfolio Optimization
-
-- Risk parity  
-- Sharpe-like optimization  
-- Volatility targeting  
-- Control de riesgo total  
+- `status`
+- `report`
+- `opportunities`
+- `dolar_rates`
+- `macro_allocation`
+- `argentina_instruments`
+- `warnings`
 
 ---
 
 ## 🖥️ Frontend
 
-- ✨ Glassmorphism cards  
-- 📈 Animaciones tipo mercado  
-- 🔢 Números dinámicos  
-- 🏆 Ranking automático  
-- 🎨 UI estilo Wall Street  
+Aplicación React + Vite que:
+
+- Consume `/analyze/sync`.
+- Refresca análisis automáticamente cada 5 minutos.
+- Muestra:
+  - reporte,
+  - oportunidades,
+  - cards de instrumentos ARS,
+  - números animados.
 
 ---
 
@@ -105,13 +241,11 @@ source venv/bin/activate  # Linux/Mac
 
 pip install -r requirements.txt
 
-cp .env.example .env
-# agregar GROQ_API_KEY
+# opcional pero recomendado para reporte/sentiment con LLM
+export GROQ_API_KEY="tu_api_key"
 
 uvicorn main:app --reload --port 8000
 ```
-
----
 
 ### Frontend
 
@@ -123,128 +257,55 @@ npm run dev
 
 ---
 
-## 🔑 APIs utilizadas
+## 🔌 Integraciones/servicios usados
 
-| API | Key | Uso |
-|-----|----|-----|
-| CoinGecko | ❌ | precios crypto |
-| Binance | ❌ | OHLC histórico |
-| dolarapi | ❌ | dólar ARS |
-| Groq | ✅ | LLM |
-| CryptoPanic | opcional | noticias |
-
----
-
-## 📡 Endpoints
-
-### POST `/api/v1/analyze/sync`
-
-```json
-{
-  "assets": ["BTC", "ETH", "SOL"],
-  "budget_ars": 500000
-}
-```
+- CoinGecko
+- Binance
+- CryptoPanic (opcional)
+- Dolar API
+- Groq (LLM)
+- yfinance (instrumentos locales)
 
 ---
 
-### POST `/api/v1/analyze`
+## ⚠️ Limitaciones actuales
 
-Análisis asincrónico (devuelve `job_id`)
-
----
-
-### GET `/api/v1/analyze/{job_id}`
-
-Consulta estado del análisis
+- El store de jobs async está en memoria (no persistente).
+- Parte del módulo ARS usa supuestos fijos (ej.: tir real CER/caución).
+- El modelo de optimización usa proxies (no covarianza histórica completa).
+- Backtesting real no modela costos/slippage/comisiones.
 
 ---
 
-### GET `/api/v1/assets/supported`
-
-Lista de assets disponibles
-
----
-
-## 📦 Output
-
-El sistema devuelve:
-
-- report  
-- opportunities  
-- macro_allocation  
-- argentina_instruments  
-- dolar_rates  
-- warnings  
-
----
-
-## 🧠 Ejemplo de salida
-
-```
-📊 RESUMEN DEL MERCADO:
-Momentum positivo en BTC, debilidad en ETH.
-
-🎯 OPORTUNIDADES:
-- BTC → BUY (score 78)
-
-⚠️ EVITAR:
-- ETH → WAIT
-
-💰 ASIGNACIÓN:
-Crypto: 30%
-LECAP: 30%
-CER: 25%
-USD: 15%
-```
-
----
-
-## 🚢 Deploy (Render)
-
-Build:
-```bash
-pip install -r requirements.txt
-```
-
-Start:
-```bash
-uvicorn main:app --host 0.0.0.0 --port $PORT
-```
-
-Env:
-```
-GROQ_API_KEY=xxxx
-```
-
----
-
-## ⚠️ Disclaimer
-
-Este sistema es informativo.  
-No constituye asesoramiento financiero.  
-Invertir implica riesgo de pérdida de capital.
-
----
-
-## 🛠️ Tech Stack
+## 🛠️ Stack
 
 ### Backend
-- FastAPI  
-- LangGraph  
-- LangChain + Groq  
-- numpy / pandas  
+
+- FastAPI
+- LangGraph
+- LangChain + Groq
+- NumPy / Pandas
+- yfinance
 
 ### Frontend
-- React + Vite  
-- UI custom (glass + trading style)  
+
+- React
+- Vite
 
 ---
 
-## 🧪 Roadmap
+## ✅ Roadmap sugerido
 
-- 📊 Mini charts por instrumento  
-- 📡 Datos en tiempo real  
-- 🧠 Modelos predictivos  
-- 📉 Backtesting  
-- 🔔 Alertas inteligentes  
+- Persistencia de jobs (Redis/Postgres).
+- Costos de ejecución y slippage en backtest.
+- Dataset macro ARS más robusto y dinámico.
+- Métricas adicionales (Sortino, Calmar, beta).
+- Alertas y scheduler para ejecución periódica.
+
+---
+
+## Disclaimer
+
+Este sistema es informativo/educativo.
+No constituye asesoramiento financiero.
+Invertir implica riesgo de pérdida de capital.
