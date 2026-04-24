@@ -225,6 +225,13 @@ Aplicación React + Vite que:
   - cards de instrumentos ARS,
   - números animados.
 
+### Demo online
+
+- Demo pública: **https://market-intelligence-ai-three.vercel.app/**
+- Frontend desplegado en **Vercel**.
+- Backend desplegado en **Render**.
+- Estado actual: **completamente funcional**.
+
 ---
 
 ## 🚀 Setup local
