@@ -1,40 +1,72 @@
-import httpx
+import asyncio
+from datetime import datetime, timedelta, timezone
 
-BASE_URL = "https://api.binance.com/api/v3/klines"
+import yfinance as yf
 
-SYMBOL_MAP = {
-    "BTC": "BTCUSDT",
-    "ETH": "ETHUSDT",
-    "SOL": "SOLUSDT",
+TICKER_MAP = {
+    "BTC": "BTC-USD",
+    "ETH": "ETH-USD",
+    "SOL": "SOL-USD",
+    "BNB": "BNB-USD",
+    "ADA": "ADA-USD",
+    "XRP": "XRP-USD",
+    "MATIC": "MATIC-USD",
+    "DOT": "DOT-USD",
+    "AVAX": "AVAX-USD",
+    "USDT": "USDT-USD",
 }
 
-async def get_ohlc_data(asset: str, interval="1d", limit=100):
-    symbol = SYMBOL_MAP.get(asset)
+INTERVAL_MAP = {
+    "1d": "1d",
+    "1h": "1h",
+}
 
-    if not symbol:
-        raise ValueError(f"Asset no soportado en Binance: {asset}")
 
-    params = {
-        "symbol": symbol,
-        "interval": interval,
-        "limit": limit
-    }
+def _fetch_ohlc_sync(ticker: str, interval: str, limit: int):
+    yf_interval = INTERVAL_MAP.get(interval)
+    if yf_interval is None:
+        raise ValueError(f"Intervalo no soportado en Yahoo Finance: {interval}")
 
-    async with httpx.AsyncClient(timeout=10) as client:
-        res = await client.get(BASE_URL, params=params)
-        res.raise_for_status()
-        data = res.json()
+    end = datetime.now(timezone.utc)
+    if interval == "1d":
+        start = end - timedelta(days=max(limit + 10, 120))
+    else:
+        start = end - timedelta(hours=max(limit + 24, 240))
 
-    # formato limpio
+    frame = yf.download(
+        tickers=ticker,
+        start=start,
+        end=end,
+        interval=yf_interval,
+        progress=False,
+        auto_adjust=False,
+        threads=False,
+    )
+
+    if frame is None or frame.empty:
+        return []
+
+    frame = frame.tail(limit)
     ohlc = []
-    for candle in data:
-        ohlc.append({
-            "timestamp": candle[0],
-            "open": float(candle[1]),
-            "high": float(candle[2]),
-            "low": float(candle[3]),
-            "close": float(candle[4]),
-            "volume": float(candle[5]),
-        })
+    for ts, row in frame.iterrows():
+        ohlc.append(
+            {
+                "timestamp": int(ts.timestamp() * 1000),
+                "open": float(row["Open"]),
+                "high": float(row["High"]),
+                "low": float(row["Low"]),
+                "close": float(row["Close"]),
+                "volume": float(row["Volume"]),
+            }
+        )
 
     return ohlc
+
+
+async def get_ohlc_data(asset: str, interval="1d", limit=100):
+    ticker = TICKER_MAP.get(asset.upper())
+
+    if not ticker:
+        raise ValueError(f"Asset no soportado en Yahoo Finance: {asset}")
+
+    return await asyncio.to_thread(_fetch_ohlc_sync, ticker, interval, limit)
