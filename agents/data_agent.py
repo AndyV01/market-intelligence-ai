@@ -3,7 +3,7 @@ from graph.state import MarketState
 from services.coingecko import get_current_prices
 from services.cryptopanic import get_crypto_news
 from services.dolar import get_dolar_rates
-from services.binance import get_ohlc_data
+from services.binance import get_ohlc_data, get_spot_prices
 from utils.cache import market_data_cache
 
 
@@ -23,11 +23,31 @@ async def _get_historical_prices(assets: list[str], warnings: list[str]) -> dict
             historical_prices[asset] = closes
             market_data_cache.set(cache_key, closes, ttl_seconds=1800)
 
-        except Exception as e:
-            warnings.append(f"OHLC error {asset}: {str(e)}")
+        except Exception:
+            warnings.append(f"OHLC no disponible para {asset}, usando serie vacía")
             historical_prices[asset] = []
 
     return historical_prices
+
+
+async def _ensure_prices(raw_prices, assets: list[str], warnings: list[str]):
+    if isinstance(raw_prices, Exception):
+        warnings.append("CoinGecko no disponible, usando fallback de precios")
+        raw_prices = {}
+
+    if raw_prices and len(raw_prices) >= max(1, len(assets) // 2):
+        return raw_prices
+
+    fallback_prices = await get_spot_prices(assets)
+    if fallback_prices:
+        warnings.append("Precios de mercado obtenidos desde Yahoo Finance")
+        if raw_prices:
+            raw_prices.update({k: v for k, v in fallback_prices.items() if k not in raw_prices})
+            return raw_prices
+        return fallback_prices
+
+    warnings.append("No se pudieron obtener precios en este ciclo")
+    return {}
 
 
 async def data_agent(state: MarketState) -> MarketState:
@@ -63,16 +83,14 @@ async def data_agent(state: MarketState) -> MarketState:
             return_exceptions=True,
         )
 
-        if isinstance(raw_prices, Exception):
-            warnings.append(f"Error fetching prices: {str(raw_prices)}")
-            raw_prices = {}
+        raw_prices = await _ensure_prices(raw_prices, assets, warnings)
 
         if isinstance(raw_news, Exception):
-            warnings.append(f"Error fetching news: {str(raw_news)}")
+            warnings.append("Error al traer noticias, se continúa sin noticias")
             raw_news = []
 
         if isinstance(dolar_rates, Exception):
-            warnings.append(f"Error fetching dolar rates: {str(dolar_rates)}")
+            warnings.append("Error al traer dólar, se continúa sin dólar")
             dolar_rates = {}
 
         historical_prices = await _get_historical_prices(assets, warnings)

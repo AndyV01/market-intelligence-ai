@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import yfinance as yf
 
@@ -14,6 +15,19 @@ TICKER_MAP = {
     "DOT": "DOT-USD",
     "AVAX": "AVAX-USD",
     "USDT": "USDT-USD",
+}
+
+ASSET_NAMES = {
+    "BTC": "Bitcoin",
+    "ETH": "Ethereum",
+    "SOL": "Solana",
+    "BNB": "BNB",
+    "ADA": "Cardano",
+    "XRP": "XRP",
+    "MATIC": "Polygon",
+    "DOT": "Polkadot",
+    "AVAX": "Avalanche",
+    "USDT": "Tether",
 }
 
 INTERVAL_MAP = {
@@ -62,6 +76,54 @@ def _fetch_ohlc_sync(ticker: str, interval: str, limit: int):
 
     return ohlc
 
+def _pct_change(current: float, base: float | None) -> float:
+    if base is None or base == 0:
+        return 0.0
+    return ((current - base) / base) * 100
+
+
+def _fetch_spot_prices_sync(assets: list[str]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for asset in assets:
+        symbol = asset.upper()
+        ticker = TICKER_MAP.get(symbol)
+        if not ticker:
+            continue
+
+        try:
+            hist = yf.Ticker(ticker).history(period="10d", interval="1d", auto_adjust=False)
+            if hist is None or hist.empty:
+                continue
+
+            hist = hist.dropna(subset=["Close"])
+            if hist.empty:
+                continue
+
+            close_price = float(hist["Close"].iloc[-1])
+            prev_close = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else None
+            close_7d = float(hist["Close"].iloc[-8]) if len(hist) >= 8 else None
+            high_24h = float(hist["High"].iloc[-1])
+            low_24h = float(hist["Low"].iloc[-1])
+            volume_24h = float(hist["Volume"].iloc[-1])
+
+            result[symbol] = {
+                "id": symbol.lower(),
+                "name": ASSET_NAMES.get(symbol, symbol),
+                "price_usd": close_price,
+                "market_cap": 0.0,
+                "volume_24h": volume_24h,
+                "change_1h": 0.0,
+                "change_24h": _pct_change(close_price, prev_close),
+                "change_7d": _pct_change(close_price, close_7d),
+                "ath": close_price,
+                "ath_change_percentage": 0.0,
+                "high_24h": high_24h,
+                "low_24h": low_24h,
+            }
+        except Exception:
+            continue
+
+    return result
 
 async def get_ohlc_data(asset: str, interval="1d", limit=100):
     ticker = TICKER_MAP.get(asset.upper())
@@ -70,3 +132,7 @@ async def get_ohlc_data(asset: str, interval="1d", limit=100):
         raise ValueError(f"Asset no soportado en Yahoo Finance: {asset}")
 
     return await asyncio.to_thread(_fetch_ohlc_sync, ticker, interval, limit)
+
+
+async def get_spot_prices(assets: list[str]) -> dict[str, Any]:
+    return await asyncio.to_thread(_fetch_spot_prices_sync, assets)
