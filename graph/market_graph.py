@@ -14,7 +14,7 @@ from agents.macro_data_agent import macro_data_agent
 def _should_continue_after_data(state: MarketState) -> str:
     if state.get("nodo_error"):
         return "end_with_error"
-    if not state.get("raw_prices"):
+    if not state.get("raw_prices") and not state.get("historical_prices"):
         return "end_with_error"
     return "continue"
 
@@ -28,7 +28,7 @@ def _should_continue_after_optimizer(state: MarketState) -> str:
 # ── ERROR NODE ─────────────────────────────
 
 def _error_node(state: MarketState) -> MarketState:
-    error = state.get("nodo_error", "Error desconocido")
+    error = state.get("nodo_error") or "Datos insuficientes para continuar"
     return {
         **state,
         "report": f"❌ El análisis no pudo completarse.\nError: {error}",
