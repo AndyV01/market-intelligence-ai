@@ -76,7 +76,6 @@ def _fetch_ohlc_sync(ticker: str, interval: str, limit: int):
 
     return ohlc
 
-
 def _pct_change(current: float, base: float | None) -> float:
     if base is None or base == 0:
         return 0.0
@@ -125,7 +124,6 @@ def _fetch_spot_prices_sync(assets: list[str]) -> dict[str, Any]:
             continue
 
     return result
-
 
 async def get_ohlc_data(asset: str, interval="1d", limit=100):
     ticker = TICKER_MAP.get(asset.upper())
