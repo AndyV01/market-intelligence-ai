@@ -2,6 +2,18 @@
 
 Sistema multi‑agente para análisis de cripto y construcción de portafolio en ARS.
 
+### Demo online
+
+- Demo pública: **https://market-intelligence-ai-three.vercel.app/**
+- Frontend desplegado en **Vercel**.
+- Backend desplegado en **Render**.
+- Estado actual: **completamente funcional**.
+
+---
+
+<img width="1918" height="869" alt="Captura de pantalla 2026-04-27 110906" src="https://github.com/user-attachments/assets/b9743fb8-4482-4074-9f27-0a9f1c1ad9a0" />
+
+
 ## 🎯 Qué resuelve
 
 Este proyecto combina en un único flujo:
@@ -224,15 +236,6 @@ Aplicación React + Vite que:
   - oportunidades,
   - cards de instrumentos ARS,
   - números animados.
-
-### Demo online
-
-- Demo pública: **https://market-intelligence-ai-three.vercel.app/**
-- Frontend desplegado en **Vercel**.
-- Backend desplegado en **Render**.
-- Estado actual: **completamente funcional**.
-
----
 
 ## 🚀 Setup local
 
